@@ -724,18 +724,22 @@ def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
 class Pipe:
     
     def __init__(self,PipeId=None,BondStrength=[]):
-        
         # PipeId - Number identifying Pipe 
         # BondStrength - List identifying the range of peel strengths for the pipe (If sample is just called "Weak" use [0,5])
         #                (If sample is just called "Strong" use [150,300] ) 
-        import configparser
-        self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
+        self.setConfiguration()        
         self.PipeId = PipeId
         self.BondStrength = BondStrength
         self.Signals = []
         self.Locations = []
         
+    def setConfiguration(self):
+        """ Reads 'config.ini' for variables associated with directories
+        """
+        import configparser, os
+        self.config = configparser.ConfigParser()
+        module_path = os.path.dirname(__file__)
+        self.config.read_file(open(module_path + '\config.ini'))
         
     def ManualScan(self, samplingFrequency, Locations, Averages=512):
         
@@ -928,7 +932,7 @@ class Pipe:
         if File.split('.')[1] == 'txt':
             from numpy import loadtxt
             
-            data = loadtxt(self.config['DEFAULT']['pipe_c_scans_db'] +'/' + File,delimiter=',')
+            data = loadtxt(self.config['DEFAULT']['pipe_c_scans_db'] + File,delimiter=',')
             
             self.Signals=list(data[:,2::])
             self.Locations=list(data[:,0:2])
@@ -947,7 +951,7 @@ class Pipe:
         
             from pickle import load
             
-            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] +'/' + File,'rb'))
+            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] + File,'rb'))
 
             if type(pipe) is dict:
                 
