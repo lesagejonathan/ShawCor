@@ -728,7 +728,9 @@ class Pipe:
         # PipeId - Number identifying Pipe 
         # BondStrength - List identifying the range of peel strengths for the pipe (If sample is just called "Weak" use [0,5])
         #                (If sample is just called "Strong" use [150,300] ) 
-        
+        import configparser
+        self.config = configparser.ConfigParser()
+        self.config.read('config.ini')
         self.PipeId = PipeId
         self.BondStrength = BondStrength
         self.Signals = []
@@ -798,21 +800,24 @@ class Pipe:
             
         return ind
         
-    def isGoodSignal(self, signal, samplingPeriod, numSteelReverbs = 2, cSteel = 5.96):
-        from numpy import diff
+    def isGoodSignal(self, signal, samplingPeriod, numSteelReverbs = 1, cSteel = 5.96):
+        from numpy import diff, mean
         """
         (Attempts to) Returns False if signal was captured over double cladded point or from a peel-tested area
         """
-        from spr2 import AmplitudeDelayPhase
+        from spr import AmplitudeDelayPhase
+        signal = signal - mean(signal)
         # T = time delay of i+1th pulse from the front-wall pulse in microseconds
         A, T, phi = AmplitudeDelayPhase(signal, 3+numSteelReverbs, samplingPeriod)
         if(max(A) > 1):
             print('Amplitude Greater Than 1')
             return False
         dA = diff(A)        
-        # 2nd pulse must be greater than 1st and jth pulse for j=3+ must be smaller than (j-1)th pulse (note: 0th pulse is the front-wall pulse)
-        if (dA[0] < 0 or (dA[1::]<0).all() ):
+        # first difference must be greater than 0 and all subsequent must be less
+        if (not dA[0] > 0 or not (dA[1::]<0).all() ):
             print('Steel reverb amplitudes not decreasing')
+            print(T/samplingPeriod)
+            AmplitudeDelayPhase(signal, 3+numSteelReverbs, samplingPeriod, debug=True)
             return False
         dT = diff(T)
         # heuristic observation that pulses cannot be less than 1.5 microseconds apart
@@ -826,14 +831,34 @@ class Pipe:
         return True
         
     def checkSignals(self):
-        from matplotlib.pyplot import plot, cla, ginput
+        from matplotlib.pyplot import plot, figure, close, ginput
         for i in range(0, len(self.Signals)):
             print('Signal ' + str(i))            
             s = self.Signals[i]
             if not self.isGoodSignal(s, self.SamplingPeriod):
-                cla()
+                figure()
                 plot(s)
-                ginput()      
+                close("all")
+                
+    def filterSignals(self):
+        from tkinter import messagebox
+        import tkinter
+        root = tkinter.Tk()
+        #root.withdraw()
+        from matplotlib.pyplot import plot, figure, close
+        toRemove = []
+        for i in range(0, len(self.Signals)):
+            print('Signal ' + str(i))            
+            s = self.Signals[i]
+            if not self.isGoodSignal(s, self.SamplingPeriod):
+                figure()
+                plot(s)
+                if(messagebox.askyesno("Print", "Rmove this signal?")):
+                    toRemove.append(i)
+                close("all")
+        root.destroy()
+        self.Signals = [self.Signals[i] for i in range(0, len(self.Signals)) if i not in toRemove]
+                      
 
     def ReturnSignals(self,Locations):
         
@@ -870,7 +895,6 @@ class Pipe:
             
             self.Signals=Signal
             self.Locations=Location
-            
         
         if SamplingPeriod is not None:
             
@@ -879,14 +903,11 @@ class Pipe:
 
     def Export(self,Filename,Path='C:/Users/utex3/Dropbox/ShawCor/pipe_auto_scans/',Format='Dictionary'):
         
-        
         if Format == 'Text':
         
             from numpy import hstack,array,savetxt
         
             # Export Raw Data to a structured text file (comma delimited)
-            print(len(array(self.Locations)))
-            print(len(array(self.Signals)))
             data=hstack((array(self.Locations),array(self.Signals)))
         
             savetxt(Path+Filename+'.txt',data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
@@ -903,13 +924,11 @@ class Pipe:
     def Load(self,File):
         
         from copy import deepcopy
-        
+        import os
         if File.split('.')[1] == 'txt':
-                
-            
             from numpy import loadtxt
             
-            data = loadtxt(File,delimiter=',')
+            data = loadtxt(self.config['DEFAULT']['pipe_c_scans_db'] +'/' + File,delimiter=',')
             
             self.Signals=list(data[:,2::])
             self.Locations=list(data[:,0:2])
@@ -928,7 +947,7 @@ class Pipe:
         
             from pickle import load
             
-            pipe = load(open(File,'rb'))
+            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] +'/' + File,'rb'))
 
             if type(pipe) is dict:
                 
