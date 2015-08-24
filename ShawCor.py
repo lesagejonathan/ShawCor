@@ -805,7 +805,7 @@ class Pipe:
         return ind
         
     def isGoodSignal(self, signal, samplingPeriod, numSteelReverbs = 1, cSteel = 5.96):
-        from numpy import diff, mean
+        from numpy import diff, mean, array
         """
         (Attempts to) Returns False if signal was captured over double cladded point or from a peel-tested area
         """
@@ -818,19 +818,19 @@ class Pipe:
             return False
         dA = diff(A)        
         # first difference must be greater than 0 and all subsequent must be less
-        if (not dA[0] > 0 or not (dA[1::]<0).all() ):
+        if (not (dA[1::]<0).all() ):
             print('Steel reverb amplitudes not decreasing')
-            print(T/samplingPeriod)
+            print(array(T)/samplingPeriod)
             AmplitudeDelayPhase(signal, 3+numSteelReverbs, samplingPeriod, debug=True)
             return False
         dT = diff(T)
         # heuristic observation that pulses cannot be less than 1.5 microseconds apart
-        if(min(dT) < 1.25): 
+        if(len(dT) == 0 or min(dT) < 1.25): 
             print('Delta T under 1.25 micros')
             return False
         # steel reverberation pulses must indicate thickness between 5 and 11
         if ((dT[2::]*cSteel/2 < 5).any() or (dT[2::]*cSteel/2>11 ).any()): 
-            print('Steel wall thickness too big or too small')
+            print('Steel wall thickness too big or too small: ' + str(dT[2::]*cSteel/2))
             return False
         return True
         
@@ -842,6 +842,7 @@ class Pipe:
             if not self.isGoodSignal(s, self.SamplingPeriod):
                 figure()
                 plot(s)
+                ginput(timeout=0)
                 close("all")
                 
     def filterSignals(self):
@@ -861,6 +862,7 @@ class Pipe:
                     toRemove.append(i)
                 close("all")
         root.destroy()
+        self.Locations = [self.Locations[i] for i in range(0, len(self.Locations)) if i not in toRemove]
         self.Signals = [self.Signals[i] for i in range(0, len(self.Signals)) if i not in toRemove]
                       
 
@@ -907,6 +909,8 @@ class Pipe:
 
     def Export(self,Filename,Path='C:/Users/utex3/Dropbox/ShawCor/pipe_auto_scans/',Format='Dictionary'):
         
+        Path = self.config['DEFAULT']['pipe_c_scans_db']
+        
         if Format == 'Text':
         
             from numpy import hstack,array,savetxt
@@ -931,8 +935,8 @@ class Pipe:
         import os
         if File.split('.')[1] == 'txt':
             from numpy import loadtxt
-            
-            data = loadtxt(self.config['DEFAULT']['pipe_c_scans_db'] + File,delimiter=',')
+            File = self.config['DEFAULT']['pipe_c_scans_db'] + File
+            data = loadtxt(File,delimiter=',')
             
             self.Signals=list(data[:,2::])
             self.Locations=list(data[:,0:2])
