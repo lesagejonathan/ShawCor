@@ -699,11 +699,11 @@ def LocalMax(x):
       
 def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
 
-    from numpy import correlate,array,angle,zeros,real,imag, mean
+    from numpy import correlate,array,angle,zeros,real,imag, mean,linspace
     from numpy.linalg import norm
     from scipy.signal import hilbert
-    from matplotlib.pyplot import plot, figure
-    x = x - mean(x)
+    from matplotlib.pyplot import plot, show, figure
+
     X=x.copy()
     xa=abs(hilbert(X))
     il,ir=PeakLimits(xa,xa.argmax(),db)
@@ -718,10 +718,11 @@ def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
     Xa=abs(xa)      
     
     if debug:
-        figure()
-        plot(Xa)
+        # figure()
+        plot(dt*linspace(0,len(Xa)-1,len(Xa)),Xa)
+        show()
     
-    ipks=LocalMax(Xa)
+    ipks=localmax(Xa)
    
     pks=Xa[ipks]  
     p=pks.copy()
@@ -748,6 +749,7 @@ def ACorrelate(x,y,M=1):
     from matplotlib.pyplot import plot
     
     N = 1 << (argmax([max(array([len(x),len(y)])) & (1<<i) for i in range(0, 32)]) + 1)
+    # N=max([len(x),len(y)])
     X=fft(x, 2*N)
     Y=fft(y, 2*N)
 

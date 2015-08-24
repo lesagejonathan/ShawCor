@@ -635,10 +635,54 @@ def ComputeResponse(sc,T,rho,c,alpha,d):
 
     return t,x,y
     
-def TransmissionReflection(s,c,rho,alpha,d):
-    pass
+def TransmissionReflection(s,rho,c,L,Ndiv=100):
+    
+    from numpy import array,identity,pi,linspace,dot,arange
+    from scipy.linalg import expm
+    
+    # from Elastodynamics.TMatrix import TMatrix1d as P
+    w=2*pi*s
+    l=L[1]
+    
+    # P = lambda y: expm(l*array([[0.,((rho[1]*y+(1-y)*rho[0])*(c[1]*y+(1-y)*c[0]))**-2],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
+    P = lambda y: expm(l*array([[0.,1/((y*rho[1]*c[1]**2+(1-y)*rho[0]*c[0]**2))],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
     
     
+    P2=P(1)
+    
+    l=L[0]/Ndiv
+
+    Y=linspace(l/2,L[0]-l/2,Ndiv)/L[0]
+
+    P02=identity(2)
+    P30=P2.copy()
+        
+    for y in Y:
+        
+        # print(y)
+        
+        # P02=dot(P(y),P02)
+    #     P30=dot(P(1-y),P30)
+        
+        P02=dot(P(y),P02)
+        P30=dot(P(1-y),P30)
+        
+    # P03=dot(P2,P02)
+    
+    P03=dot(P2,P02)
+    
+    Z0=rho[0]*c[0]
+    Z3=rho[2]*c[2]
+    
+    R03=-(P03[1,0]*1j + P03[0,0]*Z3*w - P03[1,1]*Z0*w + P03[0,1]*Z0*Z3*(w**2)*1j)/(w*(P03[0,0]*Z3 + P03[1,1]*Z0 - P03[0,1]*Z0*Z3*w*1j))
+    R30=-(P30[1,0]*1j + P30[0,0]*Z0*w - P30[1,1]*Z3*w + P30[0,1]*Z3*Z0*(w**2)*1j)/(w*(P30[0,0]*Z0 + P30[1,1]*Z3 - P30[0,1]*Z3*Z0*w*1j))
+    
+    T03=-(P03[0,0]*P03[1,0]*1j - 2*P03[0,0]*P03[1,1]*Z0*w + P03[0,1]*P03[1,0]*Z0*w)/(w*(P03[0,0]*Z3 + P03[1,1]*Z0 - P03[0,1]*Z0*Z3*w*1j))
+    T30=-(P30[0,0]*P30[1,0]*1j - 2*P30[0,0]*P30[1,1]*Z3*w + P30[0,1]*P30[1,0]*Z3*w)/(w*(P30[0,0]*Z0 + P30[1,1]*Z3 - P30[0,1]*Z3*Z0*w*1j))
+    
+    return [R03,R30,T03,T30]
+  
+
 def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
 
     from spr import EchoSeparate,PeakLimits
@@ -779,6 +823,17 @@ class Pipe:
             
             
         self.SamplingPeriod = dt
+        
+        
+    def ZeroMean(self):
+        
+        from numpy import mean
+        
+        s=self.Signals.copy()
+        
+        for i in range(len(s)):
+            
+            self.Signals[i]=s[i]-mean(s[i])
                 
         
         
