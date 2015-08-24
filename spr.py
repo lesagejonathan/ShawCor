@@ -696,17 +696,39 @@ def LocalMax(x):
     indmax=(diff(sign(DiffCentral(x))) < 0).nonzero()[0] + 1
     
     return indmax
+
+def binary_search(a, x, lo=0, hi=None):   # can't use a to specify default for hi
+    from bisect import bisect_left
+
+    hi = hi if hi is not None else len(a) # hi defaults to len(a)   
+    pos = bisect_left(a,x,lo,hi)          # find insertion position
+    return (pos if pos != hi and a[pos] == x else -1) # don't walk off the end
       
 def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
 
+<<<<<<< HEAD
     from numpy import correlate,array,angle,zeros,real,imag, mean,linspace
     from numpy.linalg import norm
     from scipy.signal import hilbert
     from matplotlib.pyplot import plot, show, figure
 
+=======
+    from numpy import correlate,array,angle,zeros,real,imag, mean, argmax
+    from numpy.linalg import norm
+    from scipy.signal import hilbert
+    from matplotlib.pyplot import plot, figure
+    from bisect import bisect_left, bisect_right
+
+    x = x - mean(x)
+>>>>>>> 84519e04f0bd27f558b1b50bd4b0c13445aa5620
     X=x.copy()
     xa=abs(hilbert(X))
-    il,ir=PeakLimits(xa,xa.argmax(),db)
+    try:
+        il,ir=PeakLimits(xa,xa.argmax(),db)
+    except IndexError:
+        print("Unable to detect reference pulse")
+        return [0 for i in range(0, N)],[0 for i in range(0, N)],[0 for i in range(0, N)]
+        
     x1=zeros(len(X))
     win=tukeywin(ir-il,ws)
     x1[il:ir]=X[il:ir]*win
@@ -721,25 +743,27 @@ def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
         # figure()
         plot(dt*linspace(0,len(Xa)-1,len(Xa)),Xa)
         show()
-    
-    ipks=localmax(Xa)
-   
-    pks=Xa[ipks]  
-    p=pks.copy()
-    pmin=pks.min()
-    ind=[]
-
-    for n in range(N):
-
-        i=p.argmax()
-        ind.append(ipks[i])
-        p[i]=pmin
-
-    ind.sort()
-
-    T=(dt/scale)*array(ind)
-    A=Xa[ind]
-    phi=angle(xa[ind])
+    width = int((ir-il))
+    candidates = LocalMax(Xa)
+    candidates.sort()
+    inds = []
+    for i in range(0, len(candidates)):
+        lesser = 0
+        greater = len(Xa)
+        if candidates[i]-width > 0: 
+            lesser = candidates[i]-width
+        if candidates[i]+width < len(Xa): 
+            greater = candidates[i]+width
+        local_candidates = candidates[bisect_left(candidates, lesser):bisect_right(candidates, greater)]
+        local_peaks = [Xa[local_candidate] for local_candidate in local_candidates]
+        if max(local_peaks) == Xa[candidates[i]]:
+            inds.append(candidates[i])            
+    if len(inds) > N:
+        inds = sorted(inds, key=lambda ind: Xa[ind])[-1*N:]
+    inds.sort()
+    T=(dt/scale)*array(inds)
+    A=Xa[inds]
+    phi=angle(xa[inds])
 
     return A,T,phi
     
@@ -762,76 +786,5 @@ def ACorrelate(x,y,M=1):
     cyx=fftshift(ifft(Cyx))*M
 
     return cyx
-    
-def find_pulses(x, k, h, n):
-    """
-        SOURCE: http://www.researchgate.net/publication/228853276_Simple_Algorithms_for_Peak_Detection_in_Time-Series    
-    
-        :param x(list): raw signal
-        :param k(int): roughly half the length of a pulse
-        :param h(int): smaller = more sensitive to peaks. Generally (0,1]
-        :param n(int): number of peaks to detect. If 0, just detects peak with h, otherwise
-        reduces h until number of peaks is met
-    """
-    from numpy import array, std, correlate, argmax
-    from scipy.signal import gaussian
-
-    ref = gaussian(k, k/6) # 3 standard deviations
-    x = correlate(abs(x), ref, 'full')
-    S = S1(x, k)
-    s = std(S)
-    h = [0] + [h] + [3] # assuming max h will be three and min 0
-    curh = 1
-    while(True):
-        candidates = []
-        for i in range(2*k, len(S)-2*k): # ignore first and last k since they are artifical
-            if (S[i]) > h[curh]*s:
-                candidates.append(i)
-    
-        pulses = []
-        start = 0
-        for i in range(0, len(candidates) - 1):
-            if candidates[i+1] - candidates[i] > k: # found break-point of cluster
-                pulses.append(candidates[start:i+1][argmax([S[j] for j in candidates[start:i+1]])])
-                start = i+1
-        # at the end of the for-loop there is definiately a peak which isn't added because there
-        # was no peak infront of it itself to trigger the if-statement. Add this last peak
-        pulses.append(candidates[start:len(candidates)][argmax([S[j] for j in candidates[start:len(candidates)]])])
-                
-        if(n==0 or n==len(pulses)): break
-        if(len(pulses) < n):
-            h.append(0.5*h[curh] + 0.5*h[curh-1])
-            h.sort()
-        else:
-            h.append(0.5*h[curh] + 0.5*h[curh+1])
-            h.sort()
-            curh = curh + 1
-    return array(pulses)-0.5*k, candidates, S, s
-    
-def find_pulses_max(x, pulses, k):
-    """
-    Finds the maximum of abs(x) given a rough location and pulse width.
-    """
-    from numpy import argmax
-    peaks = []
-    absx = abs(x)
-    for i in pulses:
-        peaks.append(i-k + argmax(absx[i-k:i+k]))
-    return peaks
-     
-def S1(data, k):
-    """ Scoring function for find_peaks.
-    """
-    from numpy import array, concatenate
-    S1 = [0 for i in range(0, len(data))]
-    x = concatenate((array([0 for i in range(0,k)]), data, array([0 for i in range(0,k)])), axis=0)
-    
-    S1[0] = k*x[k] + sum([(x[k] - xj) for xj in x[k+1:2*k+1]])
-    
-    for i in range(k+1, len(data)+k): # i+k+1 = n+k-1 + k + 1 = n+2k
-        S1[i-k] = S1[i-k-1] + (2*k+1)*x[i] - (2*k+1)*x[i-1] + x[i-k-1] - x[i+k]
-
-    return S1
-
 
 

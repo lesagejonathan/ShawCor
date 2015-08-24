@@ -768,16 +768,22 @@ def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
 class Pipe:
     
     def __init__(self,PipeId=None,BondStrength=[]):
-        
         # PipeId - Number identifying Pipe 
         # BondStrength - List identifying the range of peel strengths for the pipe (If sample is just called "Weak" use [0,5])
         #                (If sample is just called "Strong" use [150,300] ) 
-        
+        self.setConfiguration()        
         self.PipeId = PipeId
         self.BondStrength = BondStrength
         self.Signals = []
         self.Locations = []
         
+    def setConfiguration(self):
+        """ Reads 'config.ini' for variables associated with directories
+        """
+        import configparser, os
+        self.config = configparser.ConfigParser()
+        module_path = os.path.dirname(__file__)
+        self.config.read_file(open(module_path + '\config.ini'))
         
     def ManualScan(self, samplingFrequency, Locations, Averages=512):
         
@@ -853,42 +859,67 @@ class Pipe:
             
         return ind
         
-    def isGoodSignal(self, signal, samplingPeriod, numSteelReverbs = 2, cSteel = 5.96):
-        from numpy import diff
+    def isGoodSignal(self, signal, samplingPeriod, numSteelReverbs = 1, cSteel = 5.96):
+        from numpy import diff, mean, array
         """
         (Attempts to) Returns False if signal was captured over double cladded point or from a peel-tested area
         """
-        from spr2 import AmplitudeDelayPhase
+        from spr import AmplitudeDelayPhase
+        signal = signal - mean(signal)
         # T = time delay of i+1th pulse from the front-wall pulse in microseconds
         A, T, phi = AmplitudeDelayPhase(signal, 3+numSteelReverbs, samplingPeriod)
         if(max(A) > 1):
             print('Amplitude Greater Than 1')
             return False
         dA = diff(A)        
-        # 2nd pulse must be greater than 1st and jth pulse for j=3+ must be smaller than (j-1)th pulse (note: 0th pulse is the front-wall pulse)
-        if (dA[0] < 0 or (dA[1::]<0).all() ):
+        # first difference must be greater than 0 and all subsequent must be less
+        if (not (dA[1::]<0).all() ):
             print('Steel reverb amplitudes not decreasing')
+            print(array(T)/samplingPeriod)
+            AmplitudeDelayPhase(signal, 3+numSteelReverbs, samplingPeriod, debug=True)
             return False
         dT = diff(T)
         # heuristic observation that pulses cannot be less than 1.5 microseconds apart
-        if(min(dT) < 1.25): 
+        if(len(dT) == 0 or min(dT) < 1.25): 
             print('Delta T under 1.25 micros')
             return False
         # steel reverberation pulses must indicate thickness between 5 and 11
         if ((dT[2::]*cSteel/2 < 5).any() or (dT[2::]*cSteel/2>11 ).any()): 
-            print('Steel wall thickness too big or too small')
+            print('Steel wall thickness too big or too small: ' + str(dT[2::]*cSteel/2))
             return False
         return True
         
     def checkSignals(self):
-        from matplotlib.pyplot import plot, cla, ginput
+        from matplotlib.pyplot import plot, figure, close, ginput
         for i in range(0, len(self.Signals)):
             print('Signal ' + str(i))            
             s = self.Signals[i]
             if not self.isGoodSignal(s, self.SamplingPeriod):
-                cla()
+                figure()
                 plot(s)
-                ginput()      
+                ginput(timeout=0)
+                close("all")
+                
+    def filterSignals(self):
+        from tkinter import messagebox
+        import tkinter
+        root = tkinter.Tk()
+        #root.withdraw()
+        from matplotlib.pyplot import plot, figure, close
+        toRemove = []
+        for i in range(0, len(self.Signals)):
+            print('Signal ' + str(i))            
+            s = self.Signals[i]
+            if not self.isGoodSignal(s, self.SamplingPeriod):
+                figure()
+                plot(s)
+                if(messagebox.askyesno("Print", "Rmove this signal?")):
+                    toRemove.append(i)
+                close("all")
+        root.destroy()
+        self.Locations = [self.Locations[i] for i in range(0, len(self.Locations)) if i not in toRemove]
+        self.Signals = [self.Signals[i] for i in range(0, len(self.Signals)) if i not in toRemove]
+                      
 
     def ReturnSignals(self,Locations):
         
@@ -925,7 +956,6 @@ class Pipe:
             
             self.Signals=Signal
             self.Locations=Location
-            
         
         if SamplingPeriod is not None:
             
@@ -934,14 +964,13 @@ class Pipe:
 
     def Export(self,Filename,Path='C:/Users/utex3/Dropbox/ShawCor/pipe_auto_scans/',Format='Dictionary'):
         
+        Path = self.config['DEFAULT']['pipe_c_scans_db']
         
         if Format == 'Text':
         
             from numpy import hstack,array,savetxt
         
             # Export Raw Data to a structured text file (comma delimited)
-            print(len(array(self.Locations)))
-            print(len(array(self.Signals)))
             data=hstack((array(self.Locations),array(self.Signals)))
         
             savetxt(Path+Filename+'.txt',data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
@@ -958,12 +987,10 @@ class Pipe:
     def Load(self,File):
         
         from copy import deepcopy
-        
+        import os
         if File.split('.')[1] == 'txt':
-                
-            
             from numpy import loadtxt
-            
+            File = self.config['DEFAULT']['pipe_c_scans_db'] + File
             data = loadtxt(File,delimiter=',')
             
             self.Signals=list(data[:,2::])
@@ -983,7 +1010,7 @@ class Pipe:
         
             from pickle import load
             
-            pipe = load(open(File,'rb'))
+            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] + File,'rb'))
 
             if type(pipe) is dict:
                 
