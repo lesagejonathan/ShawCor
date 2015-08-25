@@ -705,14 +705,6 @@ def binary_search(a, x, lo=0, hi=None):   # can't use a to specify default for h
     return (pos if pos != hi and a[pos] == x else -1) # don't walk off the end
       
 def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
-
-<<<<<<< HEAD
-    from numpy import correlate,array,angle,zeros,real,imag, mean,linspace
-    from numpy.linalg import norm
-    from scipy.signal import hilbert
-    from matplotlib.pyplot import plot, show, figure
-
-=======
     from numpy import correlate,array,angle,zeros,real,imag, mean, argmax
     from numpy.linalg import norm
     from scipy.signal import hilbert
@@ -720,7 +712,6 @@ def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
     from bisect import bisect_left, bisect_right
 
     x = x - mean(x)
->>>>>>> 84519e04f0bd27f558b1b50bd4b0c13445aa5620
     X=x.copy()
     xa=abs(hilbert(X))
     try:
