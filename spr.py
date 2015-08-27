@@ -120,6 +120,29 @@ def expwin(N,decay):
 	w=np.exp(-decay*n)
 	return w
 	
+def moving_average(a, n=3):
+    import numpy as np
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+
+def window_frequency_domain(x, dt, fc, bw, debug=False):
+    from numpy import hanning, zeros, array
+    from numpy.linalg import norm
+    from numpy.fft import rfft, irfft
+    from matplotlib.pyplot import plot, figure
+    N = len(x)    
+    X = rfft(x)
+    fc = fc*dt*N
+    bw = int(bw*dt*N)
+    window = zeros(len(X))
+    window[fc-bw:fc+bw] = hanning(2*bw)
+    if debug:
+        figure()
+        plot(window*0.3)
+        plot(X/max(X)) # normalize to 1
+    X = window*X
+    return irfft(X)
 
 def corr(x1,x2,dt,off=0.):
 	import numpy as np
@@ -705,10 +728,10 @@ def binary_search(a, x, lo=0, hi=None):   # can't use a to specify default for h
     return (pos if pos != hi and a[pos] == x else -1) # don't walk off the end
       
 def AmplitudeDelayPhase(x,N,dt,scale=1,db=-40,ws=0.01, debug=False):
-    from numpy import correlate,array,angle,zeros,real,imag, mean, argmax
+    from numpy import correlate,array,angle,zeros,real,imag, mean, argmax, linspace
     from numpy.linalg import norm
     from scipy.signal import hilbert
-    from matplotlib.pyplot import plot, figure
+    from matplotlib.pyplot import plot, figure, show
     from bisect import bisect_left, bisect_right
 
     x = x - mean(x)

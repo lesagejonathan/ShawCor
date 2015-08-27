@@ -1,22 +1,45 @@
-def getSpeedOfSound(signal, dt, d):
+def getGroupVelocity(signal, dt, d, moving_average_n = 1, correlateSignal=True):
+    """ Calculate the speed of sound using time interval between signal peaks.
+        Correlates the signal with itself, plots it, and allows the user to select the bounds for two peaks.
+        The function then takes the index of the maximum inside the bounds as the time delay.
+        
+        If correlate is false, the function simply plots the 'signal'
+    """
     from numpy import correlate, argmax
-    from matplotlib.pyplot import plot, ginput, cla        
-
-    if(type(signal) == list):
-        return [getSpeedOfSound(signal[i], dt, d[i]) for i in range(len(signal))]
-
-    corr = (correlate(abs(signal), abs(signal), 'full'))
-    cla()
+    from matplotlib.pyplot import plot, ginput, figure
+    from spr import moving_average
+    if correlateSignal:
+        corr = (correlate(abs(signal), abs(signal), 'full'))
+        corr = moving_average(corr, moving_average_n)
+    else:
+        corr = signal
+    figure()
     plot(corr)
     print("Please provide bounds")
-    corr_max_bounds = ginput(2)
-    
-    zero_point = len(corr)/2
-    corr_max = corr_max_bounds[0][0] + argmax(corr[corr_max_bounds[0][0]:corr_max_bounds[1][0]])
-
-    deltaT = (corr_max - zero_point)*dt
-    
+    bounds = ginput(4)
+    t1 = bounds[0][0] + argmax(corr[bounds[0][0]:bounds[1][0]])
+    t2 = bounds[2][0] + argmax(corr[bounds[2][0]:bounds[3][0]])
+    deltaT = abs(t2 - t1)*dt
     return (2*d)/(deltaT)
+    
+def getGroupAttenuation(signal, dt, d, moving_average_n = 1, correlateSignal=True):
+    from numpy import log, correlate
+    from matplotlib.pyplot import plot, ginput, figure
+    from spr import moving_average
+    if correlateSignal:
+        corr = (correlate(abs(signal), abs(signal), 'full'))
+        corr = moving_average(corr, moving_average_n)
+    else:
+        corr = signal
+    figure()
+    plot(corr)
+    print("Please provide bounds")
+    bounds = ginput(4)
+    a0 = max(corr[bounds[0][0]:bounds[1][0]])
+    a1 = max(corr[bounds[2][0]:bounds[3][0]])
+    return (1/(2*d))*log(a0/a1)
+    
+    
     
 def getSpeedOfSoundAndThickness(signal_s, signal_w, dt, N, mindelay=100, c_w=1.487, c3=0, d3=0):
     """
