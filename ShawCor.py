@@ -658,53 +658,85 @@ def ComputeResponse(sc,T,rho,c,alpha,d):
 
     return t,x,y
     
-def TransmissionReflection(s,rho,c,L,Ndiv=100):
+def TransmissionReflection(s,rho,c,L,NpWl=10):
     
-    from numpy import array,identity,pi,linspace,dot,arange
+    from numpy import array,identity,pi,linspace,dot,arange,hstack,vstack,zeros,exp
     from scipy.linalg import expm
+    from numpy.linalg import solve
+    from Elastodynamics.TMatrix import TMatrix1d
     
-    # from Elastodynamics.TMatrix import TMatrix1d as P
-    w=2*pi*s
-    l=L[1]
-    
-    # P = lambda y: expm(l*array([[0.,((rho[1]*y+(1-y)*rho[0])*(c[1]*y+(1-y)*c[0]))**-2],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
-    P = lambda y: expm(l*array([[0.,1/((y*rho[1]*c[1]**2+(1-y)*rho[0]*c[0]**2))],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
-    
-    
-    P2=P(1)
+    Ndiv=round(L[0]*s[-1]/min(c))*NpWl
     
     l=L[0]/Ndiv
-
+    
     Y=linspace(l/2,L[0]-l/2,Ndiv)/L[0]
+    
+    
+    RT=zeros((4,1))
+    
+    
+    W=2*pi*s
+    
+    P = lambda x,y,z: TMatrix1d(z,(rho[0]*y+rho[1]*(1-y)),(c[0]*y+c[1]*(1-y)),x)
+    
+    for w in W:
+        
+        # P = lambda y: expm(l*array([[0.,1/((y*rho[1]*c[1]**2+(1-y)*rho[0]*c[0]**2))],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
+                        
+        P2=P(L[1],1,w) 
+    
+        P02=identity(2)
+        P30=P2
+        
+        for y in Y:
+        
+            P02=dot(P(l,y,w),P02)
+            P30=dot(P(l,1-y,w),P30)
+            
+            # print(P(y))
+   #          print(P(1-y))
 
-    P02=identity(2)
-    P30=P2.copy()
-        
-    for y in Y:
-        
-        # print(y)
-        
-        # P02=dot(P(y),P02)
-    #     P30=dot(P(1-y),P30)
-        
-        P02=dot(P(y),P02)
-        P30=dot(P(1-y),P30)
-        
-    # P03=dot(P2,P02)
+        P03=dot(P2,P02)
     
-    P03=dot(P2,P02)
+        Z0=rho[0]*c[0]
+        Z3=rho[2]*c[2]
     
-    Z0=rho[0]*c[0]
-    Z3=rho[2]*c[2]
+        k0=w/c[0]
+        k3=w/c[2]
     
-    R03=-(P03[1,0]*1j + P03[0,0]*Z3*w - P03[1,1]*Z0*w + P03[0,1]*Z0*Z3*(w**2)*1j)/(w*(P03[0,0]*Z3 + P03[1,1]*Z0 - P03[0,1]*Z0*Z3*w*1j))
-    R30=-(P30[1,0]*1j + P30[0,0]*Z0*w - P30[1,1]*Z3*w + P30[0,1]*Z3*Z0*(w**2)*1j)/(w*(P30[0,0]*Z0 + P30[1,1]*Z3 - P30[0,1]*Z3*Z0*w*1j))
+        h=L[0]+L[1]
     
-    T03=-(P03[0,0]*P03[1,0]*1j - 2*P03[0,0]*P03[1,1]*Z0*w + P03[0,1]*P03[1,0]*Z0*w)/(w*(P03[0,0]*Z3 + P03[1,1]*Z0 - P03[0,1]*Z0*Z3*w*1j))
-    T30=-(P30[0,0]*P30[1,0]*1j - 2*P30[0,0]*P30[1,1]*Z3*w + P30[0,1]*P30[1,0]*Z3*w)/(w*(P30[0,0]*Z0 + P30[1,1]*Z3 - P30[0,1]*Z3*Z0*w*1j))
+        RT03=solve(array([[-1j*w*Z0*P03[0,1]+P03[0,0],exp(1j*k3*h)],[-1j*w*Z0*P03[1,1]+P03[1,0],1j*w*Z3*exp(1j*k3*h)]]),dot(P03,array([[1],[1j*w*Z0]])))
+        RT30=solve(array([[-1j*w*Z3*P30[0,1]+P30[0,0],exp(1j*k0*h)],[-1j*w*Z3*P30[1,1]+P30[1,0],1j*w*Z0*exp(1j*k0*h)]]),dot(P30,array([[1],[1j*w*Z3]])))
     
-    return [R03,R30,T03,T30]
-  
+        RT=hstack((RT,vstack((RT03,RT30))))
+    
+    
+    return RT[:,1::]
+    
+def DiffusiveFilter(sc,T,rho,c,L):
+    
+    from numpy import linspace,zeros,vstack,array,dot
+    from scipy.signal import gausspulse
+    from numpy.fft import rfft,ifft
+
+    dt=1/(10*sc)
+    t=linspace(0,T,round(T/dt))
+    X=rfft(gausspulse((t-0.25*T),sc,bwr=-2.5))
+    
+    s=linspace(1e-5,1/(2*dt),len(X))
+    
+    RT=TransmissionReflection(s,rho,c,L)
+
+    Y=X*RT
+    
+    
+    y=2*ifft(Y,axis=1,n=2*Y.shape[1]-1)
+    
+    t=linspace(0,T,y.shape[1])
+    
+    return t,y,Y,RT
+    
 
 def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
 
@@ -768,7 +800,7 @@ def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
             
     return array(F),failind
     
-def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
+def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
     
     from spr import AmplitudeDelayPhase
     from numpy import array,mean,exp
@@ -778,16 +810,22 @@ def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
     
     for xx in x:
     
-        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-14)
+        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-20)
         
         # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2],T[2],phi[2],A[3],T[3],phi[3]])
         
+        try:
+            
+            # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2]))*2*(T[-1]-T[-2]),phi[3]])
+            
+            F.append([A[1],T[1]-T[0],phi[1],(A[3]/A[2])*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3]])
+                        
         
-        F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2])),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2])),phi[3]])
-        
-    # return scale(array(F))
+        except:
+            pass
     
     return F
+ 
 class Pipe:
     
     def __init__(self,PipeId=None,BondStrength=[]):
@@ -805,8 +843,8 @@ class Pipe:
         """
         import configparser, os
         self.config = configparser.ConfigParser()
-        module_path = os.path.dirname(__file__)
-        self.config.read_file(open(module_path + '\config.ini'))
+        config_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),'config.ini')
+        self.config.read_file(open(config_file))
         
     def ManualScan(self, samplingFrequency, Locations, Averages=512):
         
@@ -1050,13 +1088,14 @@ class PipeSet:
 
         from os import listdir
 
-        files=listdir(Path)
+        files=[f for f in listdir(Path) if f.endswith('.p')]
         Pipes=[]
 
         for f in files:
         
             p=Pipe()
-            p.Load(Path+f)
+            p.Load(f)
+            p.ZeroMean()
             if len(p.BondStrength)==2:
                 Pipes.append(p)
 
@@ -1076,7 +1115,6 @@ class PipeSet:
             signals = [p.Signals[i] for i in ind]
             
             p.Features = AmpDelay(signals,p.SamplingPeriod)
-            p.FeatureIndices = ind
             
 
     def MakeTrainingSet(self,StrengthRanges):
@@ -1084,7 +1122,7 @@ class PipeSet:
         from numpy import vstack,zeros,hstack,ones,mean,shape
         from sklearn import preprocessing
         
-        l,m=shape(self.Pipes[0].Features)
+        m=shape(self.Pipes[0].Features)[1]
     
         
         X=zeros((1,m))
@@ -1092,6 +1130,7 @@ class PipeSet:
         
         for p in self.Pipes:
                                 
+            l=shape(p.Features)[0]
             bs=mean(p.BondStrength)
                         
             for i in range(len(StrengthRanges)):
