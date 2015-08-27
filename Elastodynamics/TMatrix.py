@@ -1,13 +1,8 @@
-def TMatrix1d(w,rho,c,alpha,l):
+def TMatrix1d(w,rho,c,l):
     
     from numpy import array,exp
     
-    # print(rho)
-    # print(c)
-    # print(alpha)
-    # print(l)
-    
-    k=(w/c)-1j*alpha
+    k=w/c
     
     Z=rho*c
     
