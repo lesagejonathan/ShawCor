@@ -777,7 +777,7 @@ def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
             
     return array(F),failind
     
-def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
+def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
     
     from spr import AmplitudeDelayPhase
     from numpy import array,mean,exp
@@ -787,16 +787,22 @@ def AmpDelay(x,dt,N=4,asteel=0.01,csteel=5.9):
     
     for xx in x:
     
-        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-14)
+        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-20)
         
         # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2],T[2],phi[2],A[3],T[3],phi[3]])
         
+        try:
+            
+            # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2]))*2*(T[-1]-T[-2]),phi[3]])
+            
+            F.append([A[1],T[1]-T[0],phi[1],(A[3]/A[2])*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3]])
+                        
         
-        F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2])),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2])),phi[3]])
-        
-    # return scale(array(F))
+        except:
+            pass
     
     return F
+ 
 class Pipe:
     
     def __init__(self,PipeId=None,BondStrength=[]):
@@ -814,8 +820,8 @@ class Pipe:
         """
         import configparser, os
         self.config = configparser.ConfigParser()
-        module_path = os.path.dirname(__file__)
-        self.config.read_file(open(module_path + '\config.ini'))
+        config_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),'config.ini')
+        self.config.read_file(open(config_file))
         
     def ManualScan(self, samplingFrequency, Locations, Averages=512):
         
@@ -1059,13 +1065,14 @@ class PipeSet:
 
         from os import listdir
 
-        files=listdir(Path)
+        files=[f for f in listdir(Path) if f.endswith('.p')]
         Pipes=[]
 
         for f in files:
         
             p=Pipe()
-            p.Load(Path+f)
+            p.Load(f)
+            p.ZeroMean()
             if len(p.BondStrength)==2:
                 Pipes.append(p)
 
@@ -1085,7 +1092,6 @@ class PipeSet:
             signals = [p.Signals[i] for i in ind]
             
             p.Features = AmpDelay(signals,p.SamplingPeriod)
-            p.FeatureIndices = ind
             
 
     def MakeTrainingSet(self,StrengthRanges):
@@ -1093,7 +1099,7 @@ class PipeSet:
         from numpy import vstack,zeros,hstack,ones,mean,shape
         from sklearn import preprocessing
         
-        l,m=shape(self.Pipes[0].Features)
+        m=shape(self.Pipes[0].Features)[1]
     
         
         X=zeros((1,m))
@@ -1101,6 +1107,7 @@ class PipeSet:
         
         for p in self.Pipes:
                                 
+            l=shape(p.Features)[0]
             bs=mean(p.BondStrength)
                         
             for i in range(len(StrengthRanges)):
