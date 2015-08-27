@@ -1023,35 +1023,35 @@ class Pipe:
             self.SamplingPeriod = SamplingPeriod
 
 
-    def Export(self,Filename,Path='C:/Users/utex3/Dropbox/ShawCor/pipe_auto_scans/',Format='Dictionary'):
+    def Export(self,Filename,Path=None):
         
-        Path = self.config['DEFAULT']['pipe_c_scans_db']
+        if Path == None:
+            Path = self.config['DEFAULT']['pipe_c_scans_db']
         
-        if Format == 'Text':
+        if Filename.split('.')[-1] == 'txt':
         
             from numpy import hstack,array,savetxt
-        
+
             # Export Raw Data to a structured text file (comma delimited)
             data=hstack((array(self.Locations),array(self.Signals)))
-        
-            savetxt(Path+Filename+'.txt',data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
+
+            savetxt(Path+Filename,data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
             
-            
-        elif Format == 'Dictionary':
+        elif Filename.split('.')[-1] == 'p':
             
             from pickle import dump
             
             data={'PipeId':self.PipeId,'BondStrength':self.BondStrength,'Locations':self.Locations,'Signals':self.Signals,'SamplingPeriod':self.SamplingPeriod}
             
-            dump(data,open(Path+Filename+'.p','wb'))
+            dump(data,open(Path+Filename,'wb'))
         
-    def Load(self,File):
-        
-        from copy import deepcopy
-        import os
+    def Load(self, File, Path=None):
+
+        if Path==None:
+            Path = self.config['DEFAULT']['pipe_c_scans_db']
         if File.split('.')[1] == 'txt':
             from numpy import loadtxt
-            File = self.config['DEFAULT']['pipe_c_scans_db'] + File
+            File = Path + File
             data = loadtxt(File,delimiter=',')
             
             self.Signals=list(data[:,2::])
@@ -1071,7 +1071,7 @@ class Pipe:
         
             from pickle import load
             
-            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] + File,'rb'))
+            pipe = load(open(Path + File,'rb'))
 
             if type(pipe) is dict:
                 
@@ -1084,23 +1084,31 @@ class Pipe:
 
 class PipeSet:
             
-    def __init__(self,Path='/Users/jlesage/Dropbox/ShawCor/pipe_auto_scans/'):
-
+    def __init__(self,Path=None):   
         from os import listdir
-
+        self.setConfiguration()
+        if Path==None:
+            Path = self.config['DEFAULT']['pipe_c_scans_db']
         files=[f for f in listdir(Path) if f.endswith('.p')]
         Pipes=[]
 
         for f in files:
         
             p=Pipe()
-            p.Load(f)
+            p.Load('/' + f)
             p.ZeroMean()
             if len(p.BondStrength)==2:
                 Pipes.append(p)
 
         self.Pipes=Pipes
     
+    def setConfiguration(self):
+        """ Reads 'config.ini' for variables associated with directories
+        """
+        import configparser, os
+        self.config = configparser.ConfigParser()
+        config_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),'config.ini')
+        self.config.read_file(open(config_file))
 
     def ExtractFeatures(self,ScansPerPipe):
 
