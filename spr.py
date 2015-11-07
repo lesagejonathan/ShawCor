@@ -270,21 +270,31 @@ def dispersion(x,t,d,fc1,fp1,fp2,fc2,alpha=1):
 	f=1e-6*f[(f>=fp1)&(f<=fp2)]
 	return f,c,phi
 	
-def moments(x,y):
+def moments(y,x=None,centre='mean'):
     
-    from numpy import round,average,array
+    from numpy import average,array,linspace,trapz
     from numpy.linalg import norm
     
-    y=y/norm(y)
-        
-    xm=[]
+    if x is None:
     
-    xm.append(average(x,weights=y))
-    xm.append(average((x-xm[0])**2,weights=y))
-    xm.append(average((x-xm[0])**3,weights=y)/xm[1]**(1.5))
-    xm.append(average((x-xm[0])**4,weights=y)/xm[1]**2)
+        x=linspace(0.,len(y)-1,len(y))
+    
+    m=[]
+    
+    m.append(trapz(y,x))
+    y=y/m[0]
+        
+    if centre=='mean':
+        m.append(trapz(x*y,x))
+    elif centre=='mode':
+        m.append(x[abs(y).argmax()])
+        
+        
+    m.append(trapz(y*(x-m[1])**2,x))
+    m.append(trapz(y*(x-m[1])**3,x)) #/(m[2]**1.5))
+    m.append(trapz(y*(x-m[1])**4,x)) #/(m[2]**2))
  
-    return xm
+    return m
     
 def localmax(x):
     
@@ -424,7 +434,7 @@ def ZeroCrossings(x):
     
     return zc
     
-def EchoSeparate(x,N,db=-20,ws=0.1):
+def EchoSeparate(x,N,db=-40,ws=0.1):
 
     from numpy import zeros,array
     from scipy.signal import hilbert
@@ -777,5 +787,237 @@ def ACorrelate(x,y,M=1):
     cyx=fftshift(ifft(Cyx))*M
 
     return cyx
+    
+def DSTFT(x,y,alpha,NFFT):
+    
+    from numpy.fft import rfft
+    # from scipy.signal import tukey
+    from numpy import array,conj
+    
+    N=len(x)
+    
+    w = tukeywin(N,alpha)
 
+    X = rfft(w*x,n=NFFT)
+    Xc = conj(X)
+    
+    yw = array([w*y[i:i+N] for i in range(len(y)-N)])
+    
+    H = (rfft(yw,n=NFFT,axis=1)*Xc)/(X*Xc)    
+    
+    return H
+    
+def FFTLengthPower2(N):
+    
+    from numpy import ceil,log
+    
+    return int(2**(ceil(log(N)/log(2))))
+    
+def CircularDeconvolution(x,y,dt,fmax,beta=None):
+    
+    from numpy.fft import rfft, irfft, fftshift, fft, ifft, fftfreq, ifftshift
+    from numpy import floor,zeros,hstack,conj,pi,exp,linspace,ones,real,pi
+    from scipy.signal import blackmanharris,kaiser,hann
+    from matplotlib.pyplot import plot, show
+    
+    # mx = abs(x).argmax()
+    # my = abs(y).argmax()
+    # Nx = len(x)
+   #  Ny = len(y)
+    Nmin = len(x)+len(y)-1
+    
+   
+    N = FFTLengthPower2((len(x)+len(y)-1))
+    
+    
 
+    # X = rfft(hstack((x[mx::],zeros(abs(Ny-Nx)),x[0:mx-1])))
+    X = fft(x,n=N)
+    Sxx = fftshift(X*conj(X))
+    # Y = rfft(y[m::],n=Ny)
+    # Y = rfft(hstack((y[mx::],y[0:mx-1])))
+    Y = fft(y,n=N)
+    Syx = fftshift(Y*conj(X))
+    
+    f = fftshift(fftfreq(N,dt))
+    
+    fpass = [(f>=-fmax)&(f<=fmax)]
+    
+    H = Syx[fpass]/Sxx[fpass]
+    
+    
+    
+    if beta is None:
+    
+        H = hann(len(H))*H
+        
+    else:
+        
+        H = kaiser(len(H),beta)*H
+        
+
+    HH = zeros(N)+0.0*1j
+    
+    HH[fpass] = H.copy()
+    
+    H = ifftshift(HH)
+  
+    h = real(ifft(H))
+
+    return h[0:Nmin], H
+    
+def WienerDeconvolution(x,y,Q=0.01,Nf=5):
+    
+    from numpy.fft import rfft, irfft
+    from numpy import conj
+    
+    N = FFTLengthPower2(Nf*(len(x)+len(y)-1))
+
+    X=rfft(x,n=N)
+    Xc=conj(X)
+    Sxx=X*Xc
+    Q=Q*(abs(Sxx).max())
+    Y=rfft(y,n=N)
+    
+    H = Y*Xc/(Sxx+Q)
+    
+    h = irfft(H)
+    
+    return h
+    
+def SparseDeconvolution(x,y,p,rtype='omp'):
+    
+    from numpy import zeros, hstack, floor, array, shape
+    from scipy.linalg import toeplitz, norm
+    from sklearn.linear_model import OrthogonalMatchingPursuit, Lasso
+    
+    xm = x[abs(x).argmax()]
+
+    x = (x.copy())/xm
+    # x = ((x.copy())/xm)/norm(x)
+    
+    y = (y.copy())/xm
+    
+    Nx=len(x)
+    Ny=len(y)
+    
+    X = toeplitz(hstack((x,zeros(Nx+Ny-2))),r=zeros(Ny+Nx-1))
+
+    # X = zeros((2*Nx+Ny-2,Ny+2))
+   #
+   #  for i in range(Ny+2):
+   #
+   #      X[i:i+Nx,i] = x.copy()
+   #
+    Y = hstack((zeros(Nx-1),y,zeros(Nx-1)))
+    
+    # print(Y.shape)
+ #    print(X.shape)
+    
+    if (rtype=='omp')&(type(p)==int):
+        
+        model = OrthogonalMatchingPursuit(n_nonzero_coefs=p)
+        
+    elif (rtype=='omp')&(p<1.0):
+                
+        model = OrthogonalMatchingPursuit(tol=p)
+        
+        
+    elif (rtype=='lasso'):
+        
+        model = Lasso(alpha=p)
+        
+        
+     
+    
+    model.fit(X,Y)
+    #
+    h = model.coef_
+    
+    return Y,X,h
+    
+# def SpikeDeconvolution(x,y,offset=0.,mu=0.01):
+#
+#     from scipy.linalg import toeplitz
+#     from numpy import zeros,hstack,correlate
+#     from numpy.linalg import solve,eye
+#
+#     xm = abs(x).max()
+#
+#     x = x.copy()/xm
+#     y = y.copy()/xm
+#
+#     if len(x)>len(y):
+#
+#         y = hstack((y,zeros(len(x)-len(y))))
+#
+#     elif len(y)>len(x):
+#
+#         x = hstack((x,zeros(len(y)-len(x))))
+#
+#     return h
+    
+def Deconvolution(x,y,dt,frng,Nscale=5):
+    
+    from numpy.fft import rfft,irfft
+    from numpy import conj, zeros, hstack, array, linspace, sin, cos, ones, pi
+    
+    ftrans = min([(frng[1]-frng[0]),(frng[3]-frng[2])])
+    fs = 1/(2*dt)
+    
+    # print(ftrans)
+  #   print(fs)
+    
+    
+    N = FFTLengthPower2(Nscale*max([round(fs/ftrans),len(y)+len(x)-1]))
+        
+    X = rfft(x,n=N)
+    # X = X[0:N/2]
+    Xc = conj(X)
+    Y = rfft(y,n=N)
+    # Y = Y[0:N/2]
+    
+    Sxx = X*Xc
+    Syx = Y*Xc
+    
+    f = linspace(0.,1/(2*dt),len(Sxx))
+    df = f[1]-f[0]
+    
+    f1 = (f>=frng[0])&(f<=frng[1])
+    f2 = (f>frng[1])&(f<frng[2])
+    f3 = (f>=frng[2])&(f<=frng[3])
+
+    F = zeros(len(Sxx))
+    
+    F[f1] = sin((pi/(2*(frng[1]-frng[0])))*(f[f1]-frng[0]))**2
+    
+    F[f2] = ones(len(f2.nonzero()[0]))
+    
+    F[f3] = cos((pi/(2*(frng[3]-frng[2])))*(f[f3]-frng[2]))**2
+    
+    H = (Syx/Sxx)*F
+    
+    h = irfft(H)
+    
+    
+    return h
+    
+    
+    
+def GaussianWindow(x,Apply=True):
+    
+    from scipy.signal import hilbert
+    from numpy import linspace,exp
+    
+    m = moments(abs(hilbert(x)),centre='mode')
+    
+    n = linspace(0,len(x)-1,len(x))
+    
+    w = exp(-(1/(2*m[2]))*(n-m[1])**2)
+    
+    if Apply==True:
+        
+        w = x*w
+    
+    
+    return w

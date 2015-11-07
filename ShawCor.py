@@ -637,28 +637,37 @@ def ComputeResponse(sc,T,rho,c,alpha,d):
     
 def TransmissionReflection(s,rho,c,L,NpWl=10):
     
-    from numpy import array,identity,pi,linspace,dot,arange,hstack,vstack,zeros,exp
+    from numpy import array,identity,pi,linspace,dot,arange,hstack,vstack,zeros,exp,ceil,sqrt
     from scipy.linalg import expm
     from numpy.linalg import solve
     from Elastodynamics.TMatrix import TMatrix1d
     
-    Ndiv=round(L[0]*s[-1]/min(c))*NpWl
+    Ndiv=ceil(NpWl*L[0]*s[-1]/min(c))
     
     l=L[0]/Ndiv
+    
+    # print(Ndiv)
+   #  print(l)
     
     Y=linspace(l/2,L[0]-l/2,Ndiv)/L[0]
     
     
     RT=zeros((4,1))
     
+    M0=rho[0]*c[0]**2
+    M1=rho[1]*c[1]**2
+    
     
     W=2*pi*s
     
-    P = lambda x,y,z: TMatrix1d(z,(rho[0]*y+rho[1]*(1-y)),(c[0]*y+c[1]*(1-y)),x)
+    Rho = lambda y: rho[1]*y+rho[0]*(1-y)
+    
+    C = lambda y: sqrt((M1*y+M0*(1-y))/Rho(y))
+    
+    P = lambda x,y,z: TMatrix1d(z,Rho(y),C(y),x)
     
     for w in W:
         
-        # P = lambda y: expm(l*array([[0.,1/((y*rho[1]*c[1]**2+(1-y)*rho[0]*c[0]**2))],[-(y*rho[1]+(1-y)*rho[0])*w**2,0.]]))
                         
         P2=P(L[1],1,w) 
     
@@ -666,12 +675,10 @@ def TransmissionReflection(s,rho,c,L,NpWl=10):
         P30=P2
         
         for y in Y:
-        
+
             P02=dot(P(l,y,w),P02)
             P30=dot(P(l,1-y,w),P30)
-            
-            # print(P(y))
-   #          print(P(1-y))
+
 
         P03=dot(P2,P02)
     
@@ -683,38 +690,130 @@ def TransmissionReflection(s,rho,c,L,NpWl=10):
     
         h=L[0]+L[1]
     
-        RT03=solve(array([[-1j*w*Z0*P03[0,1]+P03[0,0],exp(1j*k3*h)],[-1j*w*Z0*P03[1,1]+P03[1,0],1j*w*Z3*exp(1j*k3*h)]]),dot(P03,array([[1],[1j*w*Z0]])))
-        RT30=solve(array([[-1j*w*Z3*P30[0,1]+P30[0,0],exp(1j*k0*h)],[-1j*w*Z3*P30[1,1]+P30[1,0],1j*w*Z0*exp(1j*k0*h)]]),dot(P30,array([[1],[1j*w*Z3]])))
+
+        RT03=solve(array([[1j*w*Z0*P03[0,1]+P03[0,0],exp(-1j*k3*h)],[1j*w*Z0*P03[1,1]+P03[1,0],-1j*w*Z3*exp(-1j*k3*h)]]),dot(P03,array([[1],[-1j*w*Z0]])))
+        RT30=solve(array([[1j*w*Z3*P30[0,1]+P30[0,0],exp(-1j*k0*h)],[1j*w*Z3*P30[1,1]+P30[1,0],-1j*w*Z0*exp(-1j*k0*h)]]),dot(P30,array([[1],[-1j*w*Z3]])))
     
         RT=hstack((RT,vstack((RT03,RT30))))
     
     
     return RT[:,1::]
     
-def DiffusiveFilter(sc,T,rho,c,L):
+def DiffusiveFilter(sc,T,rho,c,L,dt=0.001,BW=0.7):
     
-    from numpy import linspace,zeros,vstack,array,dot
+    from numpy import linspace,zeros,vstack,array,dot,conj,pi
     from scipy.signal import gausspulse
     from numpy.fft import rfft,ifft
 
-    dt=1/(10*sc)
     t=linspace(0,T,round(T/dt))
-    X=rfft(gausspulse((t-0.25*T),sc,bwr=-2.5))
+    X=rfft(gausspulse((t-0.25*T),sc,bw=BW))
     
-    s=linspace(1e-5,1/(2*dt),len(X))
+    s=linspace(0.,1/(2*dt),len(X))
+    s[0]=1e-6
     
     RT=TransmissionReflection(s,rho,c,L)
 
     Y=X*RT
     
+    s[0]=0.
     
-    y=2*ifft(Y,axis=1,n=2*Y.shape[1]-1)
+    Y[:,0] = Y[:,1]
+    
+    y=ifft(2*Y,axis=1,n=2*Y.shape[1]-1)
+        
+    x=ifft(2*X,n=2*len(X)-1)
     
     t=linspace(0,T,y.shape[1])
     
-    return t,y,Y,RT
+    return t,vstack((x,y)),s,vstack((X,Y)),RT
+    
+def PrimerH(s,R,T,c,alpha,d):
+    
+    from numpy import exp, linspace, pi
+    
+    s = linspace(s[0],s[1],s[2])
+    
+    HH = exp(-1j*2*d*2*pi*s/c)*exp(-2*alpha*d*s**2)
+    
+    H = (R[0]+(T[0]*T[1]-R[0]*R[1])*R[2]*HH)/(1-R[1]*R[2]*HH)
+    
+    return s,H
+    
+def ReflectionSequence(rho,c,alpha,d,dt,eps=1e-6):
+    
+    from numpy import exp, hstack, zeros, array
+    
+    Z = [rho[i]*c[i] for i in range(len(rho))]
+    R = [(Z[i+1]-Z[i])/(Z[i+1]+Z[i]) for i in range(len(Z)-1)]
+    T = [4*Z[i]*Z[i+1]/((Z[i]+Z[i+1])**2) for i in range(len(Z)-2)]
+    Nt = [round(2*d[i]/(dt*c[i])) for i in range(len(d))]
+   
+    A = T[0]*exp(-2*(d[0]*alpha[0]+d[1]*alpha[1]))
     
 
+    h=hstack((zeros(Nt[0]-1),R[0]*exp(-2*d[0]*alpha[0])))
+
+    h=hstack((h,zeros(Nt[1]-1),A*R[1]))
+        
+    e = 1.
+    n = 1
+    BB = 0.
+    
+    while e>eps:
+
+        B = T[1]*R[2]*exp(-2*n*d[2]*alpha[2])*(R[2]**(n-1))*((-R[1])**(n-1))
+
+        h=hstack((h,zeros(Nt[2]-1),A*B))
+
+        e = abs(B-BB)
+
+        BB = B
+
+        n+=1
+        
+    return h
+  
+def PulseDistortionFeatures(x,dt):
+    
+    from spr import ACorrelate, EchoSeparate,moments
+    from numpy import linspace
+    from numpy.linalg import norm
+    from matplotlib.pylab import plot,show
+    
+    F=[]
+    
+    for xx in x:
+        
+        xe=EchoSeparate(xx,2,db=-20,ws=0.01)
+        
+        # xc1=ACorrelate(xe[:,0]/norm(xe[:,0]),xe[:,1]/norm(xe[:,1]))
+  #
+        xc2=ACorrelate(xe[:,0],xe[:,0])
+        
+        xc3=ACorrelate(xe[:,0],xe[:,1])
+        
+        # t=linspace(-dt*len(xc1)/2,dt*len(xc1)/2,len(xc1))
+        
+        t=linspace(0,dt*len(xc2),len(xc2))
+        
+        # plot(xe[:,0])
+  #       plot(xe[:,1])
+  #
+  #       show()
+        
+        m0=moments(abs(xc2),t)
+        
+        # print(m0)
+        
+        m1=moments(abs(xc3),t)
+        
+        # print(m1)
+        
+        F.append([m1[0]-m0[0],m1[1]-m0[1],m1[2]-m0[2],m1[3]-m0[3],m1[4]-m0[4]])
+
+
+    return F
+    
 def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
 
     from spr import EchoSeparate,PeakLimits
@@ -787,7 +886,7 @@ def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
     
     for xx in x:
     
-        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-20)
+        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-40)
         
         # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2],T[2],phi[2],A[3],T[3],phi[3]])
         
@@ -795,14 +894,166 @@ def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
             
             # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2]))*2*(T[-1]-T[-2]),phi[3]])
             
-            F.append([A[1],T[1]-T[0],phi[1],(A[3]/A[2])*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3]])
+            # F.append([A[1],T[1]-T[0],phi[1],(A[3]/A[2])*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3]])
+            F.append([A[1],T[1]-T[0],phi[1]])
                         
         
         except:
             pass
     
     return F
+    
+def SpectralFeatures(x,dt,srng=[0.5,12.]):
+    
+    from spr import EchoSeparate, moments
+    from numpy.fft import rfft
+    from numpy import linspace,array
+    # from matplotlib.pyplot import
+    
+    
+    F=[]
+    
+    for xx in x:
+        
+        xe=EchoSeparate(xx,2,db=-30)
+        
+        # plot(xe)
+                
+        Xe=rfft(xe,axis=0)
+        
+        
+        Nf=Xe.shape[0]
+        
+        Xe=abs(Xe)/Nf
+   
+        
+        s=linspace(0.,1/(2*dt),Nf)
+        
+        # print(len(s))
+                
+        # sind=array([(s>=srng[0])&(s<=srng[1])]).flatten()
+        
+        # print(sind.shape)
+  #
+  #       print(len(sind))
+        
+        # s=s[sind]
+    #
+    #     Xe=Xe[sind,:]
  
+        
+        m0=moments(Xe[:,0],s)
+        m1=moments(Xe[:,1],s)
+        
+        FF = [m1[i]-m0[i] for i in range(len(m0))]
+        
+        F.append(FF)
+        
+        
+    return F
+    
+def CorrelationFeatures(x,Npts):
+
+    from spr import EchoSeparate
+    from numpy import correlate,zeros,hstack
+    from numpy.linalg import norm
+
+    F=[]
+
+    for xx in x:
+
+        xe=EchoSeparate(xx,1,db=-30)
+        
+        xe=xe.flatten()
+        
+        A=norm(xe)
+        
+        xc=correlate(xx/A,xe/A,'full')
+        
+        xc=xc[abs(xc).argmax()::]
+                
+        if len(xc)>=Npts:
+            
+            xc=xc[0:Npts]/abs(xc[0:Npts]).max()
+                    
+        else:
+            
+            xc=hstack((xc/abs(xc).max(),zeros(Npts-len(xc))))
+                
+        
+        F.append(xc)
+    
+    return F
+    
+# def ReflectionFeatures(x,dt,GateOff,Nreverbs=3,dbref=-30,alpha=0.1):
+#
+#     from scipy.signal import hilbert
+#     from spr import PeakLimits, tukeywin, SpikeDeconvolution
+#
+#     iOff1 = round(GateOff/dt)
+#
+#     iOff2 = round(GateOff/dt)
+#
+#     F = []
+#
+#
+#     for i in range(len(x)):
+#
+#         xa = abs(hilbert(xd))
+#
+#         il,ir = PeakLimits(xa,xa.argmax(),dbref)
+#
+#         x0 = x[il:ir+1]*tukeywin(il+ir,alpha)
+#
+#         x1 = x[ir:ir+iOff1+1]
+#
+#         x1 = x1*tukeywin(len(x1),alpha)
+#
+#         x2 = x[ir+i0ff1:ir+iOff1+iOff2+1]
+#
+#         x2 = x2*tukeywin(len(x2),alpha)
+#
+#         h01,R01 = SpikeDeconvolution(x0,x1,1)
+#
+#         h02,R02 = SpikeDeconvolution(x0,x2,Nreverbs)
+#
+#         i01 = h01.nonzero()
+#         i02 = h02.nonzero()
+#
+#         F.append([(i01+iOff1)*dt,h01[i01],])
+        
+        
+
+    
+    
+    
+        
+def TimeFrequencyFeatures(x,dt,srng,alpha=0.25):
+    
+    from spr import DSTFT, PeakLimits, FFTLengthPower2
+    from numpy import array, hstack, real, imag, linspace, floor, shape
+    
+    NFFT = FFTLengthPower2(round(1/(srng[2]*dt)))
+        
+    s = linspace(0.,1/(2*dt),NFFT/2+1)   
+    
+    sind = (s>=srng[0])&(s<=srng[1])
+    
+    
+    H = []
+    
+    
+    for xx in x:
+        
+        HH = DSTFT(xx[0],xx[1],alpha,NFFT)
+                        
+        HH = HH[:,sind]
+                                
+        H.append(list(hstack((real(HH).flatten(),imag(HH).flatten()))))
+        
+    return array(H)
+    
+
 class Pipe:
     
     def __init__(self,PipeId=None,BondStrength=[]):
@@ -814,6 +1065,7 @@ class Pipe:
         self.BondStrength = BondStrength
         self.Signals = []
         self.Locations = []
+        self.SteelThickness = []
         
     def setConfiguration(self):
         """ Reads 'config.ini' for variables associated with directories
@@ -1018,7 +1270,7 @@ class Pipe:
             
             from pickle import dump
             
-            data={'PipeId':self.PipeId,'BondStrength':self.BondStrength,'Locations':self.Locations,'Signals':self.Signals,'SamplingPeriod':self.SamplingPeriod}
+            data={'PipeId':self.PipeId,'BondStrength':self.BondStrength,'Locations':self.Locations,'Signals':self.Signals,'SamplingPeriod':self.SamplingPeriod,'SteelThickness':self.SteelThickness}
             
             dump(data,open(Path+Filename+'.p','wb'))
         
@@ -1057,31 +1309,77 @@ class Pipe:
                 self.Signals = pipe['Signals']
                 self.Locations = pipe['Locations']
                 self.SamplingPeriod = pipe['SamplingPeriod']
+                self.SteelThickness = pipe['SteelThickness']
 
 
 class PipeSet:
             
-    def __init__(self,Path='/Users/jlesage/Dropbox/ShawCor/pipe_auto_scans/'):
+    def __init__(self,SteelThick=None,Path='/Users/jlesage/Dropbox/ShawCor/pipe_auto_scans/'):
 
         from os import listdir
 
         files=[f for f in listdir(Path) if f.endswith('.p')]
         Pipes=[]
-
-        for f in files:
         
-            p=Pipe()
-            p.Load(f)
-            p.ZeroMean()
-            if len(p.BondStrength)==2:
-                Pipes.append(p)
+        if SteelThick is None:
+            
+            for f in files:
+        
+                p=Pipe()
+                p.Load(f)                
+                
+                if (len(p.BondStrength)==2):
+                    Pipes.append(p)
+                    
+                    
+        elif type(SteelThick) is float:
+            
+            for f in files:
+        
+                p=Pipe()
+                p.Load(f)
+            
+                if (len(p.BondStrength)==2)&(p.SteelThickness==SteelThick):
+                    Pipes.append(p)
 
         self.Pipes=Pipes
-    
+                
+    def SplitSignals(self,Period,db=-20):
+        
+        from scipy.signal import decimate, hilbert
+        from numpy import hstack,zeros
+        from spr import PeakLimits
+        
+        # Nt = round(self.SignalLength/Period)
+        
+        for p in self.Pipes:
+            
+            q = round(Period/p.SamplingPeriod)
+            
+            p.SamplingPeriod = Period
+            
+            x = p.Signals
+            
+            for i in range(len(x)):
+                
+                xd = decimate(x[i],q)
+                
+                xa = abs(hilbert(xd))
+                
+                il,ir = PeakLimits(xa,xa.argmax(),db)
+
+                # xe = zeros(Nt)
+             #
+             #    xe[(ir-il):] = xd[ir:il+Nt]
+                
+                
+                p.Signals[i] = [xd[il:ir+1],xd[ir::]]
 
     def ExtractFeatures(self,ScansPerPipe):
 
         from random import sample
+        
+        # Npts = round((3.+5*self.Pipes[0].SteelThickness/5.99)/self.Pipes[0].SamplingPeriod)
 
         for p in self.Pipes:
 
@@ -1091,29 +1389,43 @@ class PipeSet:
                         
             signals = [p.Signals[i] for i in ind]
             
-            p.Features = AmpDelay(signals,p.SamplingPeriod)
+            # p.Features = AmpDelay(signals,p.SamplingPeriod)
+            
+            # p.Features = SpectralFeatures(signals,p.SamplingPeriod)
+            
+            # p.Features = PulseDistortionFeatures(signals,p.SamplingPeriod)
+            
+            
+            # p.Features = CorrelationFeatures(signals,Npts)
+            
+            # p.Features = TimeFrequencyFeatures(signals,p.SamplingPeriod,[3.,10.,0.5])
+            
+            p.Features = ReflectionFeatures(signals,p.SamplingPeriod,Nreverbs=3,dbref=-30,alpha=0.1)
+            
             
 
-    def MakeTrainingSet(self,StrengthRanges):
+    def MakeTrainingSet(self,StrengthRanges,Scale=False):
+        
+        ''' StrengthRanges list of tuples defining the Bond Strength Ranges defining each class '''
 
         from numpy import vstack,zeros,hstack,ones,mean,shape
         from sklearn import preprocessing
         
-        m=shape(self.Pipes[0].Features)[1]
-    
+        m=len(self.Pipes[0].Features[0])
         
         X=zeros((1,m))
         y=zeros(1)
         
         for p in self.Pipes:
                                 
-            l=shape(p.Features)[0]
+            l=len(p.Features)
             bs=mean(p.BondStrength)
                         
+                                    
             for i in range(len(StrengthRanges)):
     
                 if StrengthRanges[i][0]<=bs<=StrengthRanges[i][1]:
-                    
+                                        
                     X=vstack((X,p.Features))
                     y=hstack((y,i*ones(l)))
                             
@@ -1123,5 +1435,8 @@ class PipeSet:
         
         X=X[1::,:]
         
-        self.X=preprocessing.scale(X)
-
+        if Scale:
+        
+            X=preprocessing.scale(X)
+            
+        self.X=X
