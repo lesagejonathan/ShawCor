@@ -1,22 +1,45 @@
-def getSpeedOfSound(signal, dt, d):
+def getGroupVelocity(signal, dt, d, moving_average_n = 1, correlateSignal=True):
+    """ Calculate the speed of sound using time interval between signal peaks.
+        Correlates the signal with itself, plots it, and allows the user to select the bounds for two peaks.
+        The function then takes the index of the maximum inside the bounds as the time delay.
+        
+        If correlate is false, the function simply plots the 'signal'
+    """
     from numpy import correlate, argmax
-    from matplotlib.pyplot import plot, ginput, cla        
-
-    if(type(signal) == list):
-        return [getSpeedOfSound(signal[i], dt, d[i]) for i in range(len(signal))]
-
-    corr = (correlate(abs(signal), abs(signal), 'full'))
-    cla()
+    from matplotlib.pyplot import plot, ginput, figure
+    from spr import moving_average
+    if correlateSignal:
+        corr = (correlate(abs(signal), abs(signal), 'full'))
+        corr = moving_average(corr, moving_average_n)
+    else:
+        corr = signal
+    figure()
     plot(corr)
     print("Please provide bounds")
-    corr_max_bounds = ginput(2)
-    
-    zero_point = len(corr)/2
-    corr_max = corr_max_bounds[0][0] + argmax(corr[corr_max_bounds[0][0]:corr_max_bounds[1][0]])
-
-    deltaT = (corr_max - zero_point)*dt
-    
+    bounds = ginput(4)
+    t1 = bounds[0][0] + argmax(corr[bounds[0][0]:bounds[1][0]])
+    t2 = bounds[2][0] + argmax(corr[bounds[2][0]:bounds[3][0]])
+    deltaT = abs(t2 - t1)*dt
     return (2*d)/(deltaT)
+    
+def getGroupAttenuation(signal, dt, d, moving_average_n = 1, correlateSignal=True):
+    from numpy import log, correlate
+    from matplotlib.pyplot import plot, ginput, figure
+    from spr import moving_average
+    if correlateSignal:
+        corr = (correlate(abs(signal), abs(signal), 'full'))
+        corr = moving_average(corr, moving_average_n)
+    else:
+        corr = signal
+    figure()
+    plot(corr)
+    print("Please provide bounds")
+    bounds = ginput(4)
+    a0 = max(corr[bounds[0][0]:bounds[1][0]])
+    a1 = max(corr[bounds[2][0]:bounds[3][0]])
+    return (1/(2*d))*log(a0/a1)
+    
+    
     
 def getSpeedOfSoundAndThickness(signal_s, signal_w, dt, N, mindelay=100, c_w=1.487, c3=0, d3=0):
     """
@@ -1252,35 +1275,35 @@ class Pipe:
             self.SamplingPeriod = SamplingPeriod
 
 
-    def Export(self,Filename,Path='C:/Users/utex3/Dropbox/ShawCor/pipe_auto_scans/',Format='Dictionary'):
+    def Export(self,Filename,Path=None):
         
-        Path = self.config['DEFAULT']['pipe_c_scans_db']
+        if Path == None:
+            Path = self.config['DEFAULT']['pipe_c_scans_db']
         
-        if Format == 'Text':
+        if Filename.split('.')[-1] == 'txt':
         
             from numpy import hstack,array,savetxt
-        
+
             # Export Raw Data to a structured text file (comma delimited)
             data=hstack((array(self.Locations),array(self.Signals)))
-        
-            savetxt(Path+Filename+'.txt',data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
+
+            savetxt(Path+Filename,data,delimiter=',',header=str(self.PipeId)+','+str(self.BondStrength[0])+','+str(self.BondStrength[1])+','+str(self.SamplingPeriod))
             
-            
-        elif Format == 'Dictionary':
+        elif Filename.split('.')[-1] == 'p':
             
             from pickle import dump
             
             data={'PipeId':self.PipeId,'BondStrength':self.BondStrength,'Locations':self.Locations,'Signals':self.Signals,'SamplingPeriod':self.SamplingPeriod,'SteelThickness':self.SteelThickness}
             
-            dump(data,open(Path+Filename+'.p','wb'))
+            dump(data,open(Path+Filename,'wb'))
         
-    def Load(self,File):
-        
-        from copy import deepcopy
-        import os
+    def Load(self, File, Path=None):
+
+        if Path==None:
+            Path = self.config['DEFAULT']['pipe_c_scans_db']
         if File.split('.')[1] == 'txt':
             from numpy import loadtxt
-            File = self.config['DEFAULT']['pipe_c_scans_db'] + File
+            File = Path + File
             data = loadtxt(File,delimiter=',')
             
             self.Signals=list(data[:,2::])
@@ -1300,7 +1323,7 @@ class Pipe:
         
             from pickle import load
             
-            pipe = load(open(self.config['DEFAULT']['pipe_c_scans_db'] + File,'rb'))
+            pipe = load(open(Path + File,'rb'))
 
             if type(pipe) is dict:
                 
@@ -1315,12 +1338,6 @@ class Pipe:
 class PipeSet:
             
     def __init__(self,SteelThick=None,Path='/Users/jlesage/Dropbox/ShawCor/pipe_auto_scans/'):
-
-        from os import listdir
-
-        files=[f for f in listdir(Path) if f.endswith('.p')]
-        Pipes=[]
-        
         if SteelThick is None:
             
             for f in files:
@@ -1374,7 +1391,7 @@ class PipeSet:
                 
                 
                 p.Signals[i] = [xd[il:ir+1],xd[ir::]]
-
+                
     def ExtractFeatures(self,ScansPerPipe):
 
         from random import sample
