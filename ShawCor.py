@@ -1,3 +1,112 @@
+from numpy.fft import *
+from numpy import *
+from numpy.linalg import *
+from scipy.signal import *
+from spr import *
+from scipy.optimize import *
+from matplotlib import *
+import os, pickle
+from Ultrasonic import GetSignal
+from scipy.linalg import expm
+from Elastodynamics.TMatrix import TMatrix1d
+from matplotlib.pyplot import plot, show
+
+def VelocityAttenuation(s,dt,d,c0,fbnd,df=0.1,db=-25):
+
+    from numpy import zeros
+
+    NFFT = FFTLengthPower2(round(1/(df*2*dt)))
+
+    s = s.copy()
+
+    s = s-mean(s)
+
+    sa = hilbert(s)
+
+    i0 = round((2*d/c0)/dt)
+
+    ix = abs(sa).argmax()
+
+    il,ir = PeakLimits(abs(sa),ix,db=db)
+
+    iw = max([ix-il,ir-ix])
+
+    iy = abs(sa[ix+i0-iw:ix+i0+iw]).argmax()+ix+i0-iw
+
+    w = tukeywin(2*iw,alpha=1.)
+
+    # print(shape(w))
+    # print(shape(s[ix-iw:ix+iw]))
+
+    x = w*s[ix-iw:ix+iw]
+
+    imx = abs(x).argmax()
+
+    y = w*s[iy-iw:iy+iw]
+
+    imy = abs(y).argmax()
+
+
+    x = hstack((x[imx::],zeros(NFFT-len(x)),x[0:imx]))
+
+    y = hstack((y[imy::],zeros(NFFT-len(y)),y[0:imy]))
+
+    f = linspace(0,1/(2*dt),NFFT/2+1)
+
+    ff = (f>=fbnd[0])&(f<=fbnd[1])
+
+    X = rfft(x)
+
+    Y = rfft(y)*exp(-1j*2*pi*f*(iy-ix)*dt)
+
+    H = -Y/X
+
+    phi = unwrap(angle(H))
+
+    H = H[ff]
+
+    f = f[ff]
+
+    # plot(f,log(abs(H)))
+    # plot(f,-4*pi*f*d/phi[ff])
+    # show()
+
+    c = -4*pi*f*d/phi[ff]
+
+    T = -phi[ff]/(2*pi*f)
+
+    A = log(abs(H))
+
+    p = polyfit(f,A,1)
+
+    x0 = [-p[0]/(2*d),2*d/(dt*(iy-ix))] 
+
+    C = exp(p[1])
+
+    # func = lambda x: 0.5*real(dot(conj(H-exp(-2*d*x[0]*f)*exp(-1j*4*pi*f*d*(1/x[1] - (2/pi)*x[0]*log(f/f[0])))).transpose(),H-exp(-2*d*x[0]*f)*exp(-1j*4*pi*f*d*(1/x[1] - (2/pi)*x[0]*log(f/f[0])))))
+
+    func = lambda x: 0.5*real(dot(conj(H/C-exp(-2*d*x[0]*f)*exp(-1j*4*pi*f*d/x[1])).transpose(),H/C-exp(-2*d*x[0]*f)*exp(-1j*4*pi*f*d/x[1])))
+
+    xopt = optimize.fmin(func,x0,full_output=True)
+
+    # f = linspace(1e-6,1/(2*dt),len(X))
+
+    # Ym = -C*exp(-2*d*xopt[0]*f)*exp(-1j*4*pi*f*d/xopt[1])*exp(1j*4*xopt[0]*d*log(2*pi*f)/pi)*X
+
+    # ym = ifft(2*Ym,n=2*len(Ym)-2)
+
+    # y = ifft(2*Y,n=2*len(Y)-2)
+
+    # Hm = C*exp(-2*d*xopt[0][0]*f)*exp(-1j*4*pi*f*d*(1/xopt[0][1] - (2/pi)*xopt[0][0]*(log(2*pi*f) - log(2*pi*f[0]))))
+
+    Hm = C*exp(-2*d*xopt[0][0]*f)*exp(-1j*4*pi*f*d*(1/xopt[0][1]))
+
+
+
+
+    return xopt,f,Hm,H,c,x0
+
+
 def getGroupVelocity(signal, dt, d, moving_average_n = 1, correlateSignal=True):
     """ Calculate the speed of sound using time interval between signal peaks.
         Correlates the signal with itself, plots it, and allows the user to select the bounds for two peaks.
@@ -5,9 +114,9 @@ def getGroupVelocity(signal, dt, d, moving_average_n = 1, correlateSignal=True):
         
         If correlate is false, the function simply plots the 'signal'
     """
-    from numpy import correlate, argmax
-    from matplotlib.pyplot import plot, ginput, figure
-    from spr import moving_average
+    # from numpy import correlate, argmax
+    # from matplotlib.pyplot import plot, ginput, figure
+    # from spr import moving_average
     if correlateSignal:
         corr = (correlate(abs(signal), abs(signal), 'full'))
         corr = moving_average(corr, moving_average_n)
@@ -23,9 +132,9 @@ def getGroupVelocity(signal, dt, d, moving_average_n = 1, correlateSignal=True):
     return (2*d)/(deltaT)
     
 def getGroupAttenuation(signal, dt, d, moving_average_n = 1, correlateSignal=True):
-    from numpy import log, correlate
-    from matplotlib.pyplot import plot, ginput, figure
-    from spr import moving_average
+    # from numpy import log, correlate
+    # from matplotlib.pyplot import plot, ginput, figure
+    # from spr import moving_average
     if correlateSignal:
         corr = (correlate(abs(signal), abs(signal), 'full'))
         corr = moving_average(corr, moving_average_n)
@@ -48,9 +157,9 @@ def getSpeedOfSoundAndThickness(signal_s, signal_w, dt, N, mindelay=100, c_w=1.4
         If the specimen is not on some boundary, then either c3 or d3 must be specified.
         If c3 is specified, it is necessary to select a third peak in the correlation.
     """
-    from numpy import correlate, argmax
-    from matplotlib.pyplot import plot, ginput, cla
-    from spr import Delays
+    # from numpy import correlate, argmax
+    # from matplotlib.pyplot import plot, ginput, cla
+    # from spr import Delays
     
     if(type(signal_s) == list):
         tc = [getSpeedOfSoundAndThickness(s, signal_w, dt, N, mindelay, c_w, c3, d3) for s in signal_s]
@@ -92,7 +201,7 @@ def getSpeedOfSoundAndThickness(signal_s, signal_w, dt, N, mindelay=100, c_w=1.4
     return ( thickness, speed )
     
 def myEquation(H, d, w0, w, a0, n, c0):
-    from numpy import exp
+    # from numpy import exp
     # this allocates more memory then it needs to...but it looks beautiful
     sum = 0
     for i in range(len(H)):
@@ -100,7 +209,7 @@ def myEquation(H, d, w0, w, a0, n, c0):
     return sum
 
 def Tau(d, w0, a0, n, c0, w):
-    from numpy import pi
+    # from numpy import pi
     return 2.*d *( 2*a0*(pow(w/w0, n-1) - 1)/(pi*(1-n)*w0) + 1/c0)
     
 #def myEquation2(w, a0, n, c0):
@@ -114,7 +223,7 @@ def Tau(d, w0, a0, n, c0, w):
 #    return 2.*d / ((2*a0*(pow(w/w0, n-1) - 1)/pi/(1-n)/w0) + c0)
     
 def minimize(equation, setParameters, start, stop, step):
-    from numpy import concatenate, arange
+    # from numpy import concatenate, arange
     
     minParams = concatenate((setParameters, start))
     minVal = equation(*minParams)    
@@ -149,7 +258,7 @@ def minimize(equation, setParameters, start, stop, step):
     return minVal, minParams    
     
 def exponential_fct(x, alpha, eta):
-    from numpy import ndarray
+    # from numpy import ndarray
     if type(x) is list or type(x) is ndarray:
         return [alpha*pow(x[i], eta) for i in range(0, len(x))]
     return alpha*pow(x, eta)
@@ -159,11 +268,11 @@ def exponential_fit(xdata, ydata):
     return curve_fit(exponential_fct, xdata, ydata)
 
 def getPhaseVelocityAndAttenuation(signal, dt, d2, frng, winsharp=0.1,df=0.1):
-    from matplotlib.pyplot import close, plot, ginput, show, waitforbuttonpress
-    from numpy import zeros, angle, conjugate, unwrap, pi, linspace, log, ndarray, argmax
-    from numpy.fft import rfft
-    from spr import tukeywin
-    from spr import EchoSeparate
+    # from matplotlib.pyplot import close, plot, ginput, show, waitforbuttonpress
+    # from numpy import zeros, angle, conjugate, unwrap, pi, linspace, log, ndarray, argmax
+    # from numpy.fft import rfft
+    # from spr import tukeywin
+    # from spr import EchoSeparate
     
     x = signal
 
@@ -207,7 +316,7 @@ def getPhaseVelocityAndAttenuation(signal, dt, d2, frng, winsharp=0.1,df=0.1):
     return C, Alpha
 
 def getSpeedOfSoundInWater(T, S=0, D=0):
-    from math import pow
+    # from math import pow
     """
         Return speed of sound in water. Accurate for 0<T<35, 0<D<1000.
         Ref: Speed of sound in water: A simple equation for realistic parameters. Herman Medwin 
@@ -222,7 +331,7 @@ def getSpeedOfSoundInWater(T, S=0, D=0):
 def Save(data,filename,writemode='new'):
         
     
-    import pickle,os
+    # import pickle,os
     
     # data is a dictionary containing waveforms
     
@@ -233,6 +342,9 @@ def Save(data,filename,writemode='new'):
     elif os.path.isdir('c:/Users/undel3/Dropbox/ShawCor'):
     
         pth='c:/Users/undel3/Dropbox/ShawCor/'
+    
+    elif os.path.isdir('c:/Users/utex3/Dropbox/ShawCor'):
+        pth = 'c:/Users/utex3/Dropbox/ShawCor/'
         
     else:
         
@@ -255,7 +367,7 @@ def Save(data,filename,writemode='new'):
         
 def Load(filename):
     
-    import pickle,os
+    # import pickle,os
     
     if os.path.isdir('/Users/jlesage/Dropbox/ShawCor/'):
         
@@ -264,6 +376,9 @@ def Load(filename):
     elif os.path.isdir('c:/Users/undel3/Dropbox/ShawCor'):
     
         pth='c:/Users/undel3/Dropbox/ShawCor/'
+        
+    elif os.path.isdir('c:/Users/utex3/Dropbox/ShawCor'):
+        pth = 'c:/Users/utex3/Dropbox/ShawCor/'
         
     else:
         
@@ -277,7 +392,7 @@ def Load(filename):
     
 def LoadMultiple(files,key,ind):
     
-    import pickle
+    # import pickle
     
     x=[]
     
@@ -308,303 +423,31 @@ def PipeGrid(angular, axial):
     #return list(itertools.product(*([range(angular[0],angular[1]+angular[2],angular[2]), range(axial[0],axial[1]+axial[2],axial[2])])))
     
     
-def GetSignals(nlocs,Keys,Vals,navg=512):
+def GetSignals(nlocs,Keys,Vals,navg=512, sF = 50):
     
-    from Ultrasonic import GetData
+    from Ultrasonic import GetSignal
     
-    t0,dt,x=GetData(navg,nlocs)
-
-    data={'TimeOrigin':t0,'SamplingPeriod':dt,'Signals':x}
+    signals = []    
+    data = {}
     
-    for i in range(len(Keys)):
-        
+    for i in range(0, nlocs):
+        t0,dt,x=GetSignal(navg, sF)
+        signals.append(x)
+        data = {'TimeOrigin':t0,'SamplingPeriod':dt}
+    
+    data['signals'] = signals    
+    
+    for i in range(len(Keys)):    
         data[Keys[i]]=Vals[i]
         
     return data
-    
-def ReflectionSpectrum(data,srange,ds,winsharp=0.1):
-    
-    from spr import tukeywin
-    from numpy import linspace
-    from numpy.fft import rfft
-    from numpy.linalg import norm
-    
-    x=data['Data']
-    dt=data['SamplingPeriod']
-    
-    s=[]
-    X=[]
-    
-    
-    for i in range(len(x)):
-        
-        xx=x[i]*tukeywin(len(x[i]),winsharp)
-     
-        XX=rfft(xx,int(round(1/(dt[i]*ds)-len(xx))))
 
-        ss=linspace(0.,1/(2*dt[i]),len(XX))
-
-        XX=XX[(ss>=srange[0])&(ss<=srange[1])]
-        XX=XX/norm(XX)
-
-        ss=ss[(ss>=srange[0])&(ss<=srange[1])]
-            
-        X.append(XX)
-        s.append(ss)
-        
-    data['ReflectionSpectrum']=X
-    data['Frequency']=s
-            
-    
-
-    
-    # def GetMinFreq(data,ds,srange,window=('tukeywin',0.1)):
-    #
-    #     from spr import cutwvfrm,localmin,moments
-    #     from numpy import linspace
-    #     from numpy.fft import rfft
-    #     from numpy.linalg import norm
-    #
-    #
-    #
-    #     X=[]
-    #     smin=[]
-    #     mu=[]
-    #     s=[]
-    #
-    #     print(len(x))
-    #
-    #     for i in range(len(x)):
-    #
-    #         tt,xx,ind=cutwvfrm(t[i],x[i],False,window)
-    #
-    #         XX=rfft(xx,int(round(1/(dt[i]*ds)-len(xx))))
-    #
-    #         ss=linspace(0.,1/(2*dt[i]),len(XX))
-    #
-    #         XX=XX[(ss>=srange[0])&(ss<=srange[1])]
-    #         XX=XX/norm(XX)
-    #
-    #         ss=ss[(ss>=srange[0])&(ss<=srange[1])]
-    #
-    #         sm=moments(ss,abs(XX))
-    #
-    #         indmin=localmin(abs(XX))
-    #
-    #         mu.append(sm)
-    #
-    #         smin.append(ss[indmin])
-    #
-    #         X.append(XX)
-    #
-    #         s.append(ss)
-            
-
-
-
-def MeasureBeta(t,x,sigma,SNR,fc=5.,gateoff=2*7.9e-3/6000.):
-    
-    from ultra import SignalIndex
-    from scipy.signal import hilbert
-    from numpy import blackman,zeros,linspace
-    from numpy.fft import rfft
-    from spr import pkfind,cutwvfrm
-    
-    dt=abs(t[1]-t[0])
-    
-    xa=abs(hilbert(x))
-    
-    # indgate=int(gateoff/dt)
- #
- #
- #    indmax1=xa.argmax()
- #
- #    il1,ir1=SignalIndex(xa,indmax1,sigma,SNR)
- #
- #    indmax2=xa[indgate+il1:indgate+ir1+1].argmax()+indgate
- #
- #    il2,ir2=SignalIndex(xa,indmax2,sigma,SNR)
- #
- #    indmax3=xa[2*indgate+il1:2*indgate+ir1+1].argmax()+2*indgate
- #
- #    il3,ir3=SignalIndex(xa,indmax3,sigma,SNR)
- #
- #    print(indgate)
- #
-    # print(indmax1)
-    # print(il1)
-    # print(ir1)
-    #
-    # print(indmax2)
-    # print(il2)
-    # print(ir2)
- #
- #
- #    print(indmax3)
- #    print(il3)
- #    print(ir3)
- 
-    T,X,ind1=cutwvfrm(t,x)
-    T,X,ind2=cutwvfrm(t,x)
- #    T,X,ind3=cutwvfrm(t,x)
- #
-    
-    
-    x1=zeros(x.shape)
-    
-    x1[ind1]=x[ind1]
-    
-    x2=zeros(x.shape)
-    
-    x2[ind2]=x[ind2]
-    
-    # x3=zeros(x.shape)
-    
-    # x3[ind3]=x[ind3]
-    
-    # x1[il1:ir1+1]=blackman(ir1-il1+1)*x[il1:ir1+1]
-   #  x2[il2:ir2+1]=blackman(ir2-il2+1)*x[il2:ir2+1]
-  #   x3[il3:ir3+1]=blackman(ir3-il3+1)*x[il3:ir3+1]
-    
-    X1=rfft(x1)
-    X2=rfft(x2)
-    # X3=rfft(x3)
-    
-    # beta=X1*X3/(X2*X2)
-    
-    beta=X1/X2
-    
-    f=linspace(0,1/(2*dt),len(beta))*1e-6
-    
-    betac=beta[int(fc/(f[1]-f[0]))]
-    
-    return f,beta,betac,x1,x2
-    
-    
-def ComputeBeta(f,rho1,rho2,c1,c2,eta1,eta2,K):
-    
-    from numpy import sqrt,pi
-    
-    w=2*pi*f
-    
-    Z1=rho1*c1*sqrt(1+1j*eta1)
-    Z2=rho2*c2*sqrt(1+1j*eta2)
-    
-    # beta=(-1./4.)*((Z1**2+Z2**2)/(Z1*Z2)-2.+(Z1*Z2*w**2)/(K**2))
-    
-    beta=((Z1 - Z2 + (Z1*Z2*w*1j)/K)*(Z2 - Z1 + (Z1*Z2*w*1j)/K))/(4*Z1*Z2)
-    
-    return beta
-    
-    
-def MeasureRavg(t,x,npeaks):
-
-    from spr import pkfind
-    from scipy.signal import hilbert
-    from numpy import mean
-    
-    Ravg=[]
-    
-    for i in range(len(x)):
-    
-        # tp,X=pkfind(t[i],abs(hilbert(x[i])),npeaks)
-        
-        tp,X=pkfind(t[i],abs(hilbert(x[i])),npeaks)
-        
-    
-        R=[]
-    
-        for n in range(npeaks-1):
-        
-            R.append(X[n+1]/X[n])
-            
-        Ravg.append(mean(R))
-        
-    if len(Ravg)==1:
-        
-        Ravg=Ravg[0]
-        
-    return Ravg
-        
-    
-def ComputeR(f,rho1,rho2,c1,c2,eta1,eta2,K):
-    
-    from numpy import sqrt,pi
-    
-    w=2*pi*f
-    
-    Z1=rho1*c1*sqrt(1+1j*eta1)
-    Z2=rho2*c2*sqrt(1+1j*eta2)
-    
-    R=(Z2-Z1+1j*w*Z1*Z2/K)/(Z1+Z2-1j*w*Z1*Z2/K)
-    
-    return R
-
-
-def PlateSpectrum(srng,layer,prop,perturbation,wavetype='Longitudinal'):
-    
-    # This function computes the frequency spectrum for the pipe (modelled as a 1 dimensional, multilayered plate) subject
-    # to a perturbation in wavespeed, attenuation, density or thickness
-    
-    # srng is a list of the form [frequency 1, frequency 2, frequency step ] 
-    
-    # layer is the index of the layer who's properties are perturbed:  0 - plastic, 1 - bulk adhesive, 2 - interface layer
-    # 3 - primer, 4 - steel
-    
-    # prop is a string: 'l'-thickness, 'c' - speed of sound, 'rho' - density, 'alpha' - attenuation
-    
-    # perturbation is the amount by which the prop is to be perturbed from its nominal value (-1 < perturbation < 1)
-    
-    # wavetype is the type of wave propagation being studied (default - 'Longitudinal')
-    
-    from Elastodynamics.plate import ComputeU
-    from spr import localmax
-    from numpy import arange, mean, zeros, complex128
-    from copy import deepcopy
-    
-    if wavetype is 'Longitudinal':
-        
-        P={'l':[1.1,1.7,0.01,0.1,4.9],'c':[2.2,1.9,0.,3.,5.9],'rho':[0.9,0.93,0.,1.2,7.8],'alpha':[0.4,0.6,0.,0.6,0.01]}
-    
-    elif wavetype is 'Shear':
-        
-        P={'l':[1.1,1.7,0.01,0.1,4.9],'c':[2.2,1.9,0.,3.,5.9],'rho':[0.9,0.93,0.,1.2,7.8],'alpha':[0.4,0.6,0.,0.6,0.01]}
-        
-    
-    P['c'][2]=mean((P['c'][1],P['c'][3]))
-    P['rho'][2]=mean((P['rho'][1],P['rho'][3]))
-    P['alpha'][2]=mean((P['alpha'][1],P['alpha'][3]))
-    
-    
-    
-    s=arange(srng[0],srng[1],srng[2])
-    
-    # F=zeros(6,len(s),dtype=complex)
-    
-    F=zeros((6,len(s)),dtype=complex128)
-    F[0,:]=1.+1j*0.
-
-    U=[]
-    sres=[]
-    
-    for p in perturbation:
-        
-        PP=deepcopy(P)
-                
-        PP[prop][layer]=(PP[prop][layer])*(1+p)
-                
-        UU=ComputeU(s,PP['l'],PP['c'],PP['rho'],PP['alpha'],F)
-        sres.append(s[localmax(abs(UU[:,0]))])
-        U.append(UU)
-        
-    
-    return s,sres,U
     
 def ComputeResponse(sc,T,rho,c,alpha,d):
     
-    from numpy import tan,pi,linspace,exp,zeros,hstack,vstack,array
-    from scipy.signal import gausspulse
-    from numpy.fft import rfft,ifft
+    # from numpy import tan,pi,linspace,exp,zeros,hstack,vstack,array
+    # from scipy.signal import gausspulse
+    # from numpy.fft import rfft,ifft
 
     dt=1/(10*sc)
     t=linspace(0,T,round(T/dt))
@@ -660,10 +503,10 @@ def ComputeResponse(sc,T,rho,c,alpha,d):
     
 def TransmissionReflection(s,rho,c,L,NpWl=10):
     
-    from numpy import array,identity,pi,linspace,dot,arange,hstack,vstack,zeros,exp,ceil,sqrt
-    from scipy.linalg import expm
-    from numpy.linalg import solve
-    from Elastodynamics.TMatrix import TMatrix1d
+    # from numpy import array,identity,pi,linspace,dot,arange,hstack,vstack,zeros,exp,ceil,sqrt
+    # from scipy.linalg import expm
+    # from numpy.linalg import solve
+    # from Elastodynamics.TMatrix import TMatrix1d
     
     Ndiv=ceil(NpWl*L[0]*s[-1]/min(c))
     
@@ -724,9 +567,9 @@ def TransmissionReflection(s,rho,c,L,NpWl=10):
     
 def DiffusiveFilter(sc,T,rho,c,L,dt=0.001,BW=0.7):
     
-    from numpy import linspace,zeros,vstack,array,dot,conj,pi
-    from scipy.signal import gausspulse
-    from numpy.fft import rfft,ifft
+    # from numpy import linspace,zeros,vstack,array,dot,conj,pi
+    # from scipy.signal import gausspulse
+    # from numpy.fft import rfft,ifft
 
     t=linspace(0,T,round(T/dt))
     X=rfft(gausspulse((t-0.25*T),sc,bw=BW))
@@ -752,7 +595,7 @@ def DiffusiveFilter(sc,T,rho,c,L,dt=0.001,BW=0.7):
     
 def PrimerH(s,R,T,c,alpha,d):
     
-    from numpy import exp, linspace, pi
+    # from numpy import exp, linspace, pi
     
     s = linspace(s[0],s[1],s[2])
     
@@ -761,10 +604,11 @@ def PrimerH(s,R,T,c,alpha,d):
     H = (R[0]+(T[0]*T[1]-R[0]*R[1])*R[2]*HH)/(1-R[1]*R[2]*HH)
     
     return s,H
+
     
 def ReflectionSequence(rho,c,alpha,d,dt,eps=1e-6):
     
-    from numpy import exp, hstack, zeros, array
+    # from numpy import exp, hstack, zeros, array
     
     Z = [rho[i]*c[i] for i in range(len(rho))]
     R = [(Z[i+1]-Z[i])/(Z[i+1]+Z[i]) for i in range(len(Z)-1)]
@@ -798,10 +642,10 @@ def ReflectionSequence(rho,c,alpha,d,dt,eps=1e-6):
   
 def PulseDistortionFeatures(x,dt):
     
-    from spr import ACorrelate, EchoSeparate,moments
-    from numpy import linspace
-    from numpy.linalg import norm
-    from matplotlib.pylab import plot,show
+    # from spr import ACorrelate, EchoSeparate,moments
+    # from numpy import linspace
+    # from numpy.linalg import norm
+    # from matplotlib.pylab import plot,show
     
     F=[]
     
@@ -839,9 +683,9 @@ def PulseDistortionFeatures(x,dt):
     
 def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
 
-    from spr import EchoSeparate,PeakLimits
-    from numpy import linspace,angle,unwrap,exp,pi,polyfit,hstack,array
-    from numpy.fft import rfft
+    # from spr import EchoSeparate,PeakLimits
+    # from numpy import linspace,angle,unwrap,exp,pi,polyfit,hstack,array
+    # from numpy.fft import rfft
 
     F=[]
     failind=[]
@@ -901,24 +745,24 @@ def LayerH(x,dt,N=5,Nfreqs=11,asteel=0.01,csteel=5.9):
     
 def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
     
-    from spr import AmplitudeDelayPhase
-    from numpy import array,mean,exp
+    # from spr import AmplitudeDelayPhase
+    # from numpy import array,mean,exp
     from sklearn.preprocessing import scale
     
     F=[]
     
     for xx in x:
     
-        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-40)
+        A,T,phi=AmplitudeDelayPhase(xx-mean(xx),N,dt,db=-30)
         
         # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2],T[2],phi[2],A[3],T[3],phi[3]])
         
         try:
             
-            # F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2]))*2*(T[-1]-T[-2]),phi[3]])
+            F.append([A[0],T[0],phi[0],A[1],T[1],phi[1],A[2]*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3],phi[2],A[3]*exp(2*asteel*csteel*(T[-1]-T[-2]))*2*(T[-1]-T[-2]),phi[3]])
             
             # F.append([A[1],T[1]-T[0],phi[1],(A[3]/A[2])*exp(asteel*csteel*(T[-1]-T[-2]))*(T[-1]-T[-2]),T[-1]-2*T[-2]+T[-3]])
-            F.append([A[1],T[1]-T[0],phi[1]])
+            # F.append([A[1],T[1]-T[0],phi[1]])
                         
         
         except:
@@ -928,9 +772,9 @@ def AmpDelay(x,dt,N=4,asteel=0.042,csteel=6.):
     
 def SpectralFeatures(x,dt,srng=[0.5,12.]):
     
-    from spr import EchoSeparate, moments
-    from numpy.fft import rfft
-    from numpy import linspace,array
+    # from spr import EchoSeparate, moments
+    # from numpy.fft import rfft
+    # from numpy import linspace,array
     # from matplotlib.pyplot import
     
     
@@ -977,9 +821,9 @@ def SpectralFeatures(x,dt,srng=[0.5,12.]):
     
 def CorrelationFeatures(x,Npts):
 
-    from spr import EchoSeparate
-    from numpy import correlate,zeros,hstack
-    from numpy.linalg import norm
+    # from spr import EchoSeparate
+    # from numpy import correlate,zeros,hstack
+    # from numpy.linalg import norm
 
     F=[]
 
@@ -1007,49 +851,472 @@ def CorrelationFeatures(x,Npts):
         F.append(xc)
     
     return F
+
+def AdhesiveFilter(x,dt,d,c,alpha):
+
+    from numpy import zeros
+    from numpy.fft import fft, ifft
+
+    im = abs(x).argmax()
+
+    x = hstack((x[im::],x[0:im]))
+
+    X = rfft(x)
+
+    f = linspace(0.0001,1/(2*dt),floor(len(x)/2)+1)
+
+    # H = exp(-2*d*alpha*f)*exp(-1j*4*pi*f*d*(1/c-20*alpha/pi**2))*exp(1j*4*f*alpha*d*log(2*pi*f)/pi)
+
+    H = exp(-2*d*alpha*f)*exp(-1j*4*pi*f*d*(1/c-20*alpha/pi**2))*exp(1j*4*f*alpha*d*log(2*pi*f)/pi)
+
+
+    Y = X*H
+
+    y = ifft(2*Y,n=2*len(Y)-1)
+
+    return f,x,y,X,Y
+
+
+# def PrimerReflectionFit(H,f,d1,d2,c1,c2,alpha1,alpha2):
+
+def PrimerReflectionFit(H,f,d2,c2,alpha2):
+
+
+    # Z0 = 0.943*2.05
+    # Z1 = 0.94*1.97
+
+    # H1 = exp(-2*d1*alpha1*f)*exp(-1j*4*pi*f*d1/c1)  #*exp(1j*4*alpha1*d1*log(2*pi*f)/pi)
+    # H2 = exp(-2*d2*alpha2*f)*exp(-1j*4*pi*f*d2/c2)   #*exp(1j*4*alpha2*d2*log(2*pi*f)/pi)
+
+    H2 = exp(-2*d2*alpha2*f)
+    HH2 = exp(1j*4*pi*f*d2/c2)
+    HHH2 = exp(-1j*4*pi*f*d2/c2)*H2
+
+    # H1 = exp(-2*d1*alpha1*f)*exp(-1j*4*pi*f*d1*(1/c1-20*alpha1/pi**2))*exp(1j*4*f*alpha1*d1*log(2*pi*f)/pi)
+    # H2 = exp(-2*d2*alpha2*f)*exp(-1j*4*pi*f*d2*(1/c2-20*alpha2/pi**2))*exp(1j*4*f*alpha2*d2*log(2*pi*f)/pi)
+
+    # H2 = exp(-1j*4*pi*f*d2*(1/c2)) 
+
+    # A = 4*Z0*Z1/(Z1+Z0)**2
+
+    # H1 = exp(1j*4*pi*c*f/d)
+    # H2 = exp(-2*alpha*f*d)
+    # H3 = exp()
+
+
+    # A = 4*Z0*Z1/((Z1+Z0)*(Z1-Z0))
+
+
+    # B = hstack((H1,H1*H2,H*H2))
+
+    # B = hstack((ones((shape(H2))),H2,H*H2))
+
+    B = hstack((HH2,H2,H*HHH2))
+
+    # B = hstack(())
+
+
+    Bt = conj(B.transpose())
+    # Bt = B.transpose()
+
+    # v = []
+    # r = []
+
+    # fbands = linspace(f[0],f[-1],Nfbands)
+
+    # print(fbands)
+
+    # print(shape(B))
+    # print(shape(Bt))
+
+    # for i in range(len(fbands)-1):
+
+    #     ff = (f>=fbands[i])&(f<=fbands[i+1])
+
+    #     vv = solve(dot(Bt[:,ff],B[ff,:]),dot(Bt[:,ff],Y[ff]))
+
+    #     E = Y[ff]-dot(B[ff,:],vv)
+
+    #     rr = 0.5*dot(conj(E.transpose()),E)
+
+    #     v.append(vv)
+    #     r.append(rr)
+
+    # print(c2)
+    # print(alpha2)
+    print(d2)
+
+    print(cond(dot(Bt,B)))
+
+    v = solve(dot(Bt,B),dot(Bt,H))
+
+    # v = dot(inv(dot(Bt,B)),dot(Bt,H))
+
+    # print(v)
+
+    E = H-dot(B,v)
+
+    # r = real(0.5*dot(conj(E.transpose()),E)[0][0])
+
+    r = 0.5*dot(conj(E.transpose()),E)
+
+    # r = 0.5*dot(conj(E.transpose()),E)
+
+
+    r = real(r[0,0])
+
+    print(r)
+    print(v[1]/v[0])
+
+    # print(shape(r))
+
+    return v,r
+
+
+def PrimerFitResidual(x,*params):
+
+    # v,r = PrimerReflectionFit(params[0],params[1],x[0],x[1],x[2],x[3],x[4],x[5])
+
+    v,r = PrimerReflectionFit(params[0],params[1],x[0],x[1],x[2])
+
+
+    # v,r = PrimerReflectionFit(params[],params[3],x[0],x[1],params[0],params[1],x[2],x[3])
+
+
+    return r
+
+def AdhesivePrimerH(f,v,p):
     
-# def ReflectionFeatures(x,dt,GateOff,Nreverbs=3,dbref=-30,alpha=0.1):
-#
-#     from scipy.signal import hilbert
-#     from spr import PeakLimits, tukeywin, SpikeDeconvolution
-#
-#     iOff1 = round(GateOff/dt)
-#
-#     iOff2 = round(GateOff/dt)
-#
-#     F = []
-#
-#
-#     for i in range(len(x)):
-#
-#         xa = abs(hilbert(xd))
-#
-#         il,ir = PeakLimits(xa,xa.argmax(),dbref)
-#
-#         x0 = x[il:ir+1]*tukeywin(il+ir,alpha)
-#
-#         x1 = x[ir:ir+iOff1+1]
-#
-#         x1 = x1*tukeywin(len(x1),alpha)
-#
-#         x2 = x[ir+i0ff1:ir+iOff1+iOff2+1]
-#
-#         x2 = x2*tukeywin(len(x2),alpha)
-#
-#         h01,R01 = SpikeDeconvolution(x0,x1,1)
-#
-#         h02,R02 = SpikeDeconvolution(x0,x2,Nreverbs)
-#
-#         i01 = h01.nonzero()
-#         i02 = h02.nonzero()
-#
-#         F.append([(i01+iOff1)*dt,h01[i01],])
-        
-        
+
+    d1 = p[0]
+    d2 = p[1]
+    c1 = p[2]
+    c2 = p[3]
+
+    alpha1 = p[4]
+    alpha2 = p[5]
+
+    H1 = exp(-2*d1*alpha1*f)*exp(-1j*4*pi*f*d1/c1)   
+    H2 = exp(-2*d2*alpha2*f)*exp(-1j*4*pi*f*d2/c2)  
+
+
+    # H = H1*(v[0]+v[1]*H2)/(1-v[2]*H2)
+
+    H = (v[0]+v[1]*H2)/(1-v[2]*H2)
+    
+    return H
+
+
+def AdhesiveFit(d,c,alpha,f,X1,X2,X3):
+
+
+    B = hstack((X1*exp(-1j*4*f*pi*d/c)*exp(-2*alpha*f*d),X3))   #,ones((len(X2),1))))
+
+    Bt = conj(B.transpose())
+
+    v = solve(dot(Bt,B),dot(Bt,X2))
+
+    E = X2-dot(B,v)
+
+    r = 0.5*dot(conj(E.transpose()),E)
+
+    r = real(r[0,0])
+
+    return v,r
+
+def AdhesiveFitResidual(x,*params):
+
+    v,r = AdhesiveFit(x[0],x[1],x[2],params[0],params[1],params[2],params[3])
+
+    return r
 
     
-    
-    
+def AdhesivePrimerFeatures(x,gates,dt,d,c,alpha,frng,df=0.01):
+
+    from numpy import zeros
+    from scipy.optimize import minimize
+    from scipy.signal import tukey 
+    from matplotlib.pyplot import plot,ginput,show,close
+
+    NFFT = FFTLengthPower2(round(1/(df*2*dt)))
+
+    F = []
+
+    for xx in x:
+
+        xa = hilbert(xx[abs(xx).argmax()::])
+
+        ind = array(range(len(xa)))
+
+        plot(ind,real(xa))
+
+        pts = ginput(6)
+
+        close()
+
+        im1 = abs(xa[pts[0][0]:pts[1][0]]).argmax() + pts[0][0]
+
+        iw1 = max([im1-pts[0][0],pts[1][0]-im1])
+
+        x1 = real(xa[im1-iw1:im1+iw1])
+
+        x1 = x1*tukey(len(x1),alpha=0.01)
+
+        x1 = x1-mean(x1)
+
+        im2 = abs(xa[pts[2][0]:pts[3][0]]).argmax() + pts[2][0]
+
+        iw2 = max([im2-pts[2][0],pts[3][0]-im2])
+
+        x2 = real(xa[im2-iw2:im2+iw2])
+
+        x2 = x2*tukey(len(x2),alpha=0.01)
+
+        x2 = x2 - mean(x2)
+
+        im3 = abs(xa[pts[4][0]:pts[5][0]]).argmax() + pts[4][0]
+
+        iw3 = max([im3-pts[4][0],pts[5][0]-im3])
+
+        x3 = real(xa[im3-iw3:im3+iw3])
+
+        x3 = x3*tukey(len(x3),alpha=0.01)
+
+        x3 = x3 - mean(x3)
+
+        # plot(x1)
+        # plot(x2)
+        # plot(x3)
+
+
+        x1 = hstack((x1[floor(len(x1)/2)+1::],zeros(NFFT-len(x1)),x1[0:floor(len(x1)/2)+1]))
+
+        x2 = hstack((x2[floor(len(x2)/2)+1::],zeros(NFFT-len(x2)),x2[0:floor(len(x2)/2)+1]))
+
+        x3 = hstack((x3[floor(len(x3)/2)+1::],zeros(NFFT-len(x3)),x3[0:floor(len(x3)/2)+1]))
+
+        T = dt*(im2-im1)
+
+        f = linspace(0.,1/(2*dt),NFFT/2+1)
+
+        X1 = rfft(x1)*exp(1j*2*pi*f*T)
+
+        X2 = rfft(x2)
+
+        X3 = rfft(x3)
+
+        ff = (f>=frng[0])&(f<=frng[1])
+
+        X1 = X1[ff]
+        X1 = X1.reshape((len(X1),1))
+        # X1 = X1/norm(X1)
+        X2 = X2[ff]
+        X2 = X2.reshape((len(X2),1))
+        X3 = X3[ff]
+        X3 = X3.reshape((len(X3),1))
+        # X3 = X3/norm(X3)
+        f = f[ff]
+        f = f.reshape((len(f),1))
+
+        # X1 = X1/max(abs(X2))
+        # X2 = X2/max(abs(X2))
+        # X3 = X3/max(abs(X2))
+
+        params = (f,X1,X2,X3)
+
+        varranges = (slice(dt*(pts[2][0]-im1)*c[1][0]/2, dt*(im2-im1)*c[1][0]/2, 0.01), slice(c[1][0],c[1][1],0.1), slice(alpha[1][0],alpha[1][1],0.05))
+
+        # X = rfft(x1)
+
+        # # X = X[ff]
+
+        # # X = X.reshape((len(X),1))
+
+
+
+
+        # x2 = hstack((x2[abs(hilbert(x2)).argmax()::],zeros(NFFT-len(x2)),x2[0:abs(hilbert(x2)).argmax()]))
+
+
+
+
+
+
+
+        # t = linspace(0,len(xxx)*dt,len(xxx))
+
+
+        # x1 = xxx[(t>=gates[0][0])&(t<=gates[0][1])]
+
+        # x2 = xxx[(t>=gates[1][0])&(t<=gates[1][1])]
+
+        # x1a = abs(hilbert(x1))
+
+        # i1m = x1a.argmax()
+
+        # il1,ir1 = PeakLimits(x1a,i1m,db=-25)
+
+        # i1 = max([i1m-il1,ir1-i1m])
+
+
+        # x2a = abs(hilbert(x2))
+
+        # i2m = x2a.argmax()
+
+        # il2,ir2 = PeakLimits(x2a,i2m,db=-45)
+
+        # i2 = max([i2m-il2,ir2-i2m])
+
+
+        # x1 = x1[i1m-i1:i1m+i1]
+
+        # w1 = tukey(len(x1),0.01)
+
+        # x1 = x1*w1
+
+        # x2 = x2[i2m-i2:i2m+i2]
+
+        # w2 = tukey(len(x2),0.01)
+
+        # x2 = x2*w2
+
+        # x1 = hstack((x1[abs(hilbert(x1)).argmax()::],zeros(NFFT-len(x1)),x1[0:abs(hilbert(x1)).argmax()]))
+
+        # x2 = hstack((x2[abs(hilbert(x2)).argmax()::],zeros(NFFT-len(x2)),x2[0:abs(hilbert(x2)).argmax()]))
+
+        # plot(x1)
+        # plot(x2)
+
+        # show()
+
+
+
+
+
+        # f = linspace(0.,1/(2*dt),NFFT/2+1)
+
+        # df = f[1]-f[0]
+
+        # T1 = gates[1][0]+dt*i2m-dt*i2-(gates[0][0]+dt*i1m)
+
+        # T2 = gates[1][0]+dt*i2m-(gates[0][0]+dt*i1m)
+
+        # ff = (f>=frng[0])&(f<=frng[1])
+
+        # X = rfft(x1)
+
+        # # X = X[ff]
+
+        # # X = X.reshape((len(X),1))
+
+        # Y = rfft(x2)  #*exp(-1j*T2*2*pi*f)
+
+ 
+
+        # Y = rfft(x2)
+
+        # print(A)
+
+        # Y = rfft(x2,NFFT)*exp(1j*2*pi*f*dt*i1m)
+
+        # Y = Y.reshape((len(Y),1))
+
+        # H = A*Yn*conj(Xn)/(Xn*conj(Xn))
+
+        # H = A*(Y/X)
+
+        # H = (Y/X)*exp(alpha[0]*c[0]*(T2-T1)*f)
+
+        # # phi0 = angle(H*exp(1j*T2*2*pi*f))
+
+        # # phi0 = phi0[ff]
+
+        # H = H[ff]
+
+
+
+        # H = H.reshape((max(shape(H)),1))
+
+        # # H = H/norm(H)
+
+
+        # f = f[ff]
+
+        # f = f.reshape((len(f),1))
+
+        # param = (c[0],c[1],H,f)
+
+        # x0 = array([d[0],d[1],alpha[0],alpha[1]])
+
+        # x0 = array([d[0],d[1],c[0],c[1],alpha[0],alpha[1]])
+
+
+        # x1 = array([d[0][0],d[1][0],c[0][0],c[1][0],alpha[0][0],alpha[1][0]])
+
+        # x2 = array([d[0][1],d[1][1],c[0][1],c[1][1],alpha[0][1],alpha[1][1]])
+
+
+        # param = (H,f)
+
+        # d[0] = (c[0][0]*T1/2,c[0][1]*T2/2)
+
+        # d[1] = (d[1][0],c[1][0]*(T2-T1)/2)
+
+        # print(d[0])
+        # print(d[1])
+
+        # bnds = (d[0],d[1],c[0],c[1],alpha[0],alpha[1])
+
+        # x0 = (mean(d[0]),mean(d[1]),mean(c[0]),mean(c[1]),mean(alpha[0]),mean(alpha[1]))
+
+
+        # bnds = (d,c[1],alpha[1])
+
+        # x0 = (d[1]*0.75,mean(c[1]),mean(alpha[1]))
+
+        # varranges = (slice(d[0],d[1],0.01),slice(c[1][0],c[1][1],0.1),slice(alpha[1][0],alpha[1][1],0.01))
+
+
+        # varranges = (slice(c[0][0]*T1/2,c[0][1]*T2/2,dt*c[0][0]/2),slice(d[0],d[1],dt*c[1][0]/2),slice(c[0][0],c[0][1],c[0][2]),slice(c[1][0],c[1][1],c[1][2]),slice(alpha[0][0],alpha[0][1],alpha[0][2]),slice(alpha[1][0],alpha[1][1],alpha[1][2]))
+
+        # print(varranges[0])
+        # print(varranges[1])
+
+        res = optimize.brute(AdhesiveFitResidual,varranges,args=params,full_output=True,finish=False)
+
+        # res = optimize.fmin(PrimerFitResidual,x0,args=param,full_output=True)
+
+        # R = minimize(PrimerFitResidual,x0,args=param,method='SLSQP',bounds=bnds,options={'ftol':1e-8,'eps':1e-8})
+
+
+
+        # res = optimize.fminbound(PrimerFitResidual,x1,x2,args=param,full_output=True)
+
+
+        # v,r = PrimerReflectionFit(H,f,res[0][0],res[0][1],res[0][2],res[0][3],res[0][4],res[0][5],Nfbands)
+
+        # v,r = PrimerReflectionFit(H,f,res[0][0],res[0][1],c[0],c[1],res[0][2],res[0][3])
+
+        # v,r = PrimerReflectionFit(H,f,R.x[0],R.x[1],R.x[2],R.x[3],R.x[4],R.x[5])
+
+        # v,r = PrimerReflectionFit(H,f,R.x[0],R.x[1],R.x[2])
+
+        v,r = AdhesiveFit(res[0][0],res[0][1],res[0][2],f,X1,X2,X3)
+
+        T = dt*(im2-im1) - 2*res[0][0]/res[0][1]
+
+        X2m = X1*exp(-4*pi*1j*f*res[0][0]/res[0][1])*exp(-2*res[0][2]*res[0][0])*v[0]/2 + X3*v[1]/2 #+ ones((len(X2),1))*v[2]
+
+
+        # F.append([R.x[0],R.x[]])
+
+        F.append([T*2.9/2,res[0][0],res[0][1],res[0][2],res[1],v])
+
+
+        # F.append([res[1],res[0][0],res[0][1],res[0][2],res[0][3],res[0][4],res[0][5],real(v[0]),imag(v[0]),real(v[1]),imag(v[1]),real(v[2]),imag(v[2])])
+
+    return F,f,X2,X2m
+
         
 def TimeFrequencyFeatures(x,dt,srng,alpha=0.25):
     
@@ -1075,7 +1342,63 @@ def TimeFrequencyFeatures(x,dt,srng,alpha=0.25):
         H.append(list(hstack((real(HH).flatten(),imag(HH).flatten()))))
         
     return array(H)
-    
+
+def AnalyticSignalFeatures(x,dt,gates):
+
+    from scipy.signal import tukey
+
+
+    F = []
+
+    for xx in x:
+
+        xa = hilbert(xx.copy())
+
+        xa = xa[abs(xa).argmax()::]/abs(xa).max()
+
+        t = linspace(0,len(xa)*dt,len(xa))
+
+        i1m = abs(xa[(t>=gates[0][0])&(t<=gates[0][1])]).argmax() + round(gates[0][0]/dt)
+
+        il1,ir1 = PeakLimits(abs(xa),i1m,db=-20)
+
+        i2m = abs(xa[(t>=gates[1][0])&(t<=gates[1][1])]).argmax() + round(gates[1][0]/dt)
+
+        il2,ir2 = PeakLimits(abs(xa),i2m,db=-35)
+
+        x1a = abs(xa[il1:ir1])
+        x1a = x1a*tukey(len(x1a),1.)
+
+        x2a = abs(xa[il2:ir2])
+        x2a = x2a*tukey(len(x2a),0.1)
+
+        x1m = moments(x1a,t[il1:ir1])
+
+        x2m = moments(x2a,t[il2:ir2])
+
+        # plot(x1a)
+        # plot(x2a)
+
+        # show()
+
+
+
+        # x1 = xa[(t>=gates[0][0])&(t<=gates[0][1])]
+
+        # x1m = moments(abs(x1),t[(t>=gates[0][0])&(t<=gates[0][1])])
+
+        # # x2 = xa[(t>=gates[1][0])&(t<=gates[1][1])]
+
+        # x2m = moments(abs(x2),t[(t>=gates[1][0])&(t<=gates[1][1])])
+
+
+        # F.append([x2m[0]/x1m[0],(gates[1][0]+x2m[1])-(gates[0][0]+x1m[1]),x2m[2]-x1m[2],x2m[3]-x1m[3],x2m[4]-x1m[4]])
+
+        F.append([(x2m[0]-x1m[0])/x1m[0],(x2m[1]-x1m[1])/x1m[1],(x2m[2]-x1m[2])/x1m[2],(x2m[3]-x1m[3])/x1m[3],(x2m[4]-x1m[4])/x1m[4]])
+
+    return F
+
+
 
 class Pipe:
     
@@ -1098,10 +1421,10 @@ class Pipe:
         config_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),'config.ini')
         self.config.read_file(open(config_file))
         
-    def ManualScan(self, samplingFrequency, Locations, Averages=512):
+    def ManualScan(self, Locations, samplingFrequency, Averages=512):
         
-        from Ultrasonic import GetSignal
-        from numpy.linalg import norm
+#        from Ultrasonic import GetSignal
+#        from numpy.linalg import norm
         
         # This function takes scans at various locations along a pipe, 
         
@@ -1118,11 +1441,12 @@ class Pipe:
             self.AddSignal(x/norm(x),l)
             
         self.SamplingPeriod = dt
+        self.Locations = Locations
         
     def AutoScan(self, Locations, samplingFrequency, Averages=512):
         import pygclib
-        from Ultrasonic import GetSignal
-        from numpy.linalg import norm
+#        from Ultrasonic import GetSignal
+#        from numpy.linalg import norm
         
         curAngle = 0
         curZ = 0
@@ -1142,6 +1466,7 @@ class Pipe:
             
             
         self.SamplingPeriod = dt
+        self.Locations = Locations
         
         
     def ZeroMean(self):
@@ -1338,12 +1663,23 @@ class Pipe:
 class PipeSet:
             
     def __init__(self,SteelThick=None,Path='/Users/jlesage/Dropbox/ShawCor/pipe_auto_scans/'):
+
+        from os import listdir
+        # self.setConfiguration()
+        # if Path==None:
+        #     Path = self.config['DEFAULT']['pipe_c_scans_db']
+
+
+        files=[f for f in listdir(Path) if f.endswith('.p')]
+        Pipes=[]
+
         if SteelThick is None:
             
             for f in files:
         
                 p=Pipe()
-                p.Load(f)                
+                p.Load(f,Path=Path)  
+                p.ZeroMean()              
                 
                 if (len(p.BondStrength)==2):
                     Pipes.append(p)
@@ -1354,44 +1690,60 @@ class PipeSet:
             for f in files:
         
                 p=Pipe()
-                p.Load(f)
+                p.Load(f,Path=Path)
+                p.ZeroMean()
             
                 if (len(p.BondStrength)==2)&(p.SteelThickness==SteelThick):
                     Pipes.append(p)
 
         self.Pipes=Pipes
+
+        self.Gates = [(0.55,1.75),(1.8,4.3)]
+
                 
-    def SplitSignals(self,Period,db=-20):
+    def SplitSignals(self,Period,db=-30):
         
-        from scipy.signal import decimate, hilbert
+        from scipy.signal import hilbert
         from numpy import hstack,zeros
         from spr import PeakLimits
         
-        # Nt = round(self.SignalLength/Period)
         
         for p in self.Pipes:
-            
-            q = round(Period/p.SamplingPeriod)
-            
-            p.SamplingPeriod = Period
             
             x = p.Signals
             
             for i in range(len(x)):
-                
-                xd = decimate(x[i],q)
-                
-                xa = abs(hilbert(xd))
+                                
+                xa = abs(hilbert(x[i]))
                 
                 il,ir = PeakLimits(xa,xa.argmax(),db)
-
-                # xe = zeros(Nt)
-             #
-             #    xe[(ir-il):] = xd[ir:il+Nt]
-                
                 
                 p.Signals[i] = [xd[il:ir+1],xd[ir::]]
+
+    def DownSample(self,Period):
+
+        from scipy.signal import decimate
+
+        for p in self.Pipes:
+
+            if Period!=p.SamplingPeriod:
+            
+                q = round(Period/p.SamplingPeriod)
+                p.SamplingPeriod = Period
+                x = p.Signals
+
+                for i in range(len(x)):
                 
+                    p.Signals[i] = decimate(x[i],q)
+    
+    # def setConfiguration(self):
+    #     """ Reads 'config.ini' for variables associated with directories
+    #     """
+    #     import configparser, os
+    #     self.config = configparser.ConfigParser()
+    #     config_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),'config.ini')
+    #     self.config.read_file(open(config_file))
+
     def ExtractFeatures(self,ScansPerPipe):
 
         from random import sample
@@ -1417,16 +1769,18 @@ class PipeSet:
             
             # p.Features = TimeFrequencyFeatures(signals,p.SamplingPeriod,[3.,10.,0.5])
             
-            p.Features = ReflectionFeatures(signals,p.SamplingPeriod,Nreverbs=3,dbref=-30,alpha=0.1)
+            # p.Features = ReflectionFeatures(signals,p.SamplingPeriod,Nreverbs=3,dbref=-30,alpha=0.1)
+
+            p.Features = AnalyticSignalFeatures(signals,p.SamplingPeriod,self.Gates)
             
             
 
-    def MakeTrainingSet(self,StrengthRanges,Scale=False):
+    def MakeTrainingSet(self,StrengthRanges,Scale='standard'):
         
         ''' StrengthRanges list of tuples defining the Bond Strength Ranges defining each class '''
 
-        from numpy import vstack,zeros,hstack,ones,mean,shape
         from sklearn import preprocessing
+        from numpy import zeros
         
         m=len(self.Pipes[0].Features[0])
         
@@ -1434,15 +1788,17 @@ class PipeSet:
         y=zeros(1)
         
         for p in self.Pipes:
-                                
+
+            # if ((p.PipeId in IdList[0])&(p.PipeId not in IdList[1]) or (IdList == None)):
+
             l=len(p.Features)
             bs=mean(p.BondStrength)
-                        
-                                    
-            for i in range(len(StrengthRanges)):
-    
-                if StrengthRanges[i][0]<=bs<=StrengthRanges[i][1]:
+                            
                                         
+            for i in range(len(StrengthRanges)):
+        
+                if StrengthRanges[i][0]<=bs<=StrengthRanges[i][1]:
+                                            
                     X=vstack((X,p.Features))
                     y=hstack((y,i*ones(l)))
                             
@@ -1452,8 +1808,99 @@ class PipeSet:
         
         X=X[1::,:]
         
-        if Scale:
+        if Scale=='standard':
+
+            ss = preprocessing.StandardScaler()
         
-            X=preprocessing.scale(X)
+            self.FeatureScaling = ss.fit(X)
+
+            X = ss.transform(X)
+
+        elif Scale=='robust':
+
+            ss = preprocessing.RobustScaler()
+        
+            self.FeatureScaling = ss.fit(X)
+
+            X = ss.transform(X)
             
         self.X=X
+
+    def FitRBFClassifier(self,C_range=logspace(-3,3,4),gamma_range=logspace(-3,3,4)):
+
+        from sklearn.cross_validation import StratifiedShuffleSplit
+        from sklearn.grid_search import GridSearchCV
+        from sklearn import svm
+
+        param_grid = dict(gamma=gamma_range, C=C_range)
+        cv = StratifiedShuffleSplit(self.y, n_iter=10, test_size=0.1, random_state=42)
+        grid = GridSearchCV(svm.SVC(), param_grid=param_grid, cv=cv)
+        grid.fit(self.X, self.y)
+
+        self.RBFClassifier = svm.SVC(C=grid.best_params_['C'],gamma=grid.best_params_['gamma'])
+        self.RBFClassifier.fit(self.X,self.y)
+        self.RBFScore = self.RBFClassifier.score(self.X,self.y)
+        self.MaxDistance = max(self.RBFClassifier.decision_function(self.X))
+        self.MinDistance = min(self.RBFClassifier.decision_function(self.X))
+
+        self.RBFClassifierCVScore = grid.best_score_
+
+    def FitLinearClassifier(self,C_range=logspace(-3,3,4)):
+
+        from sklearn.cross_validation import StratifiedShuffleSplit
+        from sklearn.grid_search import GridSearchCV
+        from sklearn import svm
+
+    
+        param_grid = dict(C=C_range)
+        cv = StratifiedShuffleSplit(self.y, n_iter=5, test_size=0.2, random_state=42)
+        grid = GridSearchCV(svm.SVC(kernel='linear'), param_grid=param_grid, cv=cv)
+        grid.fit(self.X, self.y)
+
+        self.LinearClassifier = svm.SVC(kernel='linear',C=grid.best_params_['C'])
+        self.LinearClassifierCVScore = grid.best_score_
+
+
+    def TestScan(self):
+
+        while True:
+
+            ui = input('Press (t) to test current location, Press (q) to quit: ')
+
+            if ui == 't':
+
+                t0,dt,x = GetSignal(64,100,dev=0)
+
+                x = x-mean(x)
+                x = x/norm(x)
+
+                X = AnalyticSignalFeatures([x],dt,self.Gates)
+
+                X = self.FeatureScaling.transform(array(X))
+
+                X = X.reshape(1, -1)
+
+                pred = self.RBFClassifier.predict(X)
+
+                pred_strength = self.RBFClassifier.decision_function(X)
+
+                if pred == 0:
+
+                    print('Weak')
+                    print(str(pred_strength[0]/self.MinDistance))
+
+                elif pred == 1:
+
+                    print('Strong')
+                    print(str(pred_strength[0]/self.MaxDistance))
+
+
+            else:
+
+                break
+
+
+
+
+
+

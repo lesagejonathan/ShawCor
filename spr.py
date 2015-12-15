@@ -314,8 +314,8 @@ def moments(y,x=None,centre='mean'):
         
         
     m.append(trapz(y*(x-m[1])**2,x))
-    m.append(trapz(y*(x-m[1])**3,x)) #/(m[2]**1.5))
-    m.append(trapz(y*(x-m[1])**4,x)) #/(m[2]**2))
+    m.append(trapz(y*(x-m[1])**3,x)/(m[2]**1.5))
+    m.append(trapz(y*(x-m[1])**4,x)/(m[2]**2))
  
     return m
     
@@ -341,8 +341,10 @@ def PeakLimits(x,indmax,db):
     
     from numpy import log10
     
-    indleft=indmax
-    indright=indmax
+    indleft = indmax
+    indright = indmax
+
+    indrightmax = len(x)-1
     
     xx=x.copy()
 
@@ -353,8 +355,14 @@ def PeakLimits(x,indmax,db):
     while DB>db:
     
         indleft -=1
+
+        if indleft == 0:
+
+        	break
     
-        DB=20*log10(xx[indleft])
+        else: 
+
+        	DB=20*log10(xx[indleft])
 
     
     DB=0.
@@ -362,8 +370,14 @@ def PeakLimits(x,indmax,db):
     while DB>db:
     
         indright +=1
+
+        if indright==indrightmax:
+
+        	break
+
+        else:
     
-        DB=20*log10(xx[indright])
+        	DB=20*log10(xx[indright])
     
     return indleft, indright
         
@@ -910,14 +924,15 @@ def WienerDeconvolution(x,y,Q=0.01,Nf=5):
     
 def SparseDeconvolution(x,y,p,rtype='omp'):
     
-    from numpy import zeros, hstack, floor, array, shape
+    from numpy import zeros, hstack, floor, array, shape, sign
     from scipy.linalg import toeplitz, norm
     from sklearn.linear_model import OrthogonalMatchingPursuit, Lasso
     
     xm = x[abs(x).argmax()]
 
+    # x = (x.copy())/xm
     x = (x.copy())/xm
-    # x = ((x.copy())/xm)/norm(x)
+    x = x/norm(x)
     
     y = (y.copy())/xm
     
@@ -926,59 +941,29 @@ def SparseDeconvolution(x,y,p,rtype='omp'):
     
     X = toeplitz(hstack((x,zeros(Nx+Ny-2))),r=zeros(Ny+Nx-1))
 
-    # X = zeros((2*Nx+Ny-2,Ny+2))
-   #
-   #  for i in range(Ny+2):
-   #
-   #      X[i:i+Nx,i] = x.copy()
-   #
     Y = hstack((zeros(Nx-1),y,zeros(Nx-1)))
-    
-    # print(Y.shape)
- #    print(X.shape)
     
     if (rtype=='omp')&(type(p)==int):
         
-        model = OrthogonalMatchingPursuit(n_nonzero_coefs=p)
+        model = OrthogonalMatchingPursuit(n_nonzero_coefs=p,normalize=False)
         
     elif (rtype=='omp')&(p<1.0):
                 
-        model = OrthogonalMatchingPursuit(tol=p)
+        model = OrthogonalMatchingPursuit(tol=p,normalize=False)
         
         
     elif (rtype=='lasso'):
         
         model = Lasso(alpha=p)
-        
-        
-     
+
     
     model.fit(X,Y)
-    #
+
     h = model.coef_
+    b = model.intercept_
     
-    return Y,X,h
+    return Y-b,X,h
     
-# def SpikeDeconvolution(x,y,offset=0.,mu=0.01):
-#
-#     from scipy.linalg import toeplitz
-#     from numpy import zeros,hstack,correlate
-#     from numpy.linalg import solve,eye
-#
-#     xm = abs(x).max()
-#
-#     x = x.copy()/xm
-#     y = y.copy()/xm
-#
-#     if len(x)>len(y):
-#
-#         y = hstack((y,zeros(len(x)-len(y))))
-#
-#     elif len(y)>len(x):
-#
-#         x = hstack((x,zeros(len(y)-len(x))))
-#
-#     return h
     
 def Deconvolution(x,y,dt,frng,Nscale=5):
     
@@ -1044,3 +1029,36 @@ def GaussianWindow(x,Apply=True):
     
     
     return w
+
+
+
+# def GaussianPulseFit(x,dt):
+
+# 	from numpy.fft import rfft
+# 	from numpy import angle
+
+# 	X = rfft(x,n=FFTLengthPower2(len(x)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
